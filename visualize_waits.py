@@ -570,8 +570,7 @@ document.getElementById("legend").innerHTML = BANDS.map((b, i) =>
 
 document.getElementById("links").innerHTML =
   `<a href="${LINKS.tracker}" target="_blank" rel="noopener">Live wait tracker ↗</a>` +
-  `<a href="${LINKS.county}" target="_blank" rel="noopener">Early voting sites &amp; hours ↗</a>` +
-  `<span>Site names link to directions.</span>`;
+  `<a href="${LINKS.county}" target="_blank" rel="noopener">Early voting sites &amp; hours ↗</a>`;
 
 // Right now: latest poll per site, grouped by town, worst first within the town.
 (function renderNow() {
