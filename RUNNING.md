@@ -100,7 +100,7 @@ as gray in the report and is listed when the script runs.
 ```sh
 ./visualize_waits.py 2026-10-15_to_2026_10-31.csv -o docs/index.html
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
-  --hide-scrollbars --window-size=1150,3800 --screenshot=docs/report.png \
+  --hide-scrollbars --window-size=1150,3000 --screenshot=docs/report.png \
   "file://$PWD/docs/index.html"
 git add docs 2026-10-15_to_2026_10-31.csv && git commit -m "Update report"
 ```

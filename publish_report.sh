@@ -26,7 +26,7 @@ CHROME=${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}
 CSV=${CSV:-2026-10-15_to_2026_10-31.csv}
 END_DATE=${END_DATE:-2026-11-01}
 LABEL=${LABEL:-com.rtphokie.wakeearlyvotewait.publish}
-SHOT_HEIGHT=3800 # tall enough for the whole page; any extra is page background
+SHOT_HEIGHT=3000 # tall enough for the whole page; any extra is page background
 
 # Log every run to logs/publish.log (also shown on screen when run by hand).
 mkdir -p logs

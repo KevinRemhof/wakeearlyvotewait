@@ -32,8 +32,6 @@ The report includes:
 - **Average reported wait time:** the average across sites over the day.
 - **Early votes cast per day:** turnout from the State Board, posted the next
   morning.
-- **How often sites update their reported wait time:** when each site updated,
-  typical and longest gaps between updates, and how stale reported wait times were.
 - **Typical wait by time of day, by town:** averaged over every day collected.
 - **Data notes:** each day's polling window and any gaps when the monitor wasn't
   running. For example, there were no polls on Thursday morning, Oct 15, from
@@ -68,7 +66,7 @@ Each CSV row is one site at one poll:
 Things to know when using the data:
 
 - **Waits are ranges and are only as current as the site's last update.** Sites
-  update every 10–90 minutes. The report shows how stale reported wait times were.
+  update every 10–90 minutes.
 - **Gaps in the data are gaps in polling,** not periods with no wait. The report
   lists them under Data notes.
 - **Turnout counts accepted in-person early votes per site per day.** They come

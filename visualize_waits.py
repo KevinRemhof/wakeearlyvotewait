@@ -9,8 +9,6 @@ The report is a single self-contained HTML file (no network needed to view it):
                       with that day's early votes per site
   * Average wait    - mean reported wait time across sites over the day
   * Turnout by day  - early votes cast per day (State Board data)
-  * Update frequency - when each site updated its reported wait time, typical and
-                      longest gaps between updates, and how stale they were
   * Typical by hour - town x half-hour heatmap averaged over every day collected
   * Data notes      - each day's polling window and any gaps when the monitor wasn't
                       running, plus notes given with --note
@@ -404,8 +402,6 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 svg { display: block; }
 svg text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 svg .lbl { fill: var(--ink-2); font-size: 12px; }
-svg .tick { fill: var(--line); }
-svg .gap { fill: var(--grid); }
 svg .num { fill: var(--ink-2); font-size: 12px; }
 svg .city { fill: var(--ink); font-size: 12px; font-weight: 600; }
 .kpis { display: flex; flex-wrap: wrap; gap: 24px; margin: 8px 0 4px; }
@@ -470,13 +466,6 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
     <p class="sub" id="turn-sub"></p>
     <div class="kpis" id="turn-kpis"></div>
     <div id="turn"></div>
-  </section>
-
-  <section class="card" aria-labelledby="h-upd">
-    <h2 id="h-upd">How often sites update their reported wait time</h2>
-    <p class="sub" id="upd-sub"></p>
-    <div class="kpis" id="upd-kpis"></div>
-    <div class="scroll" id="upd"></div>
   </section>
 
   <section class="card" aria-labelledby="h-tod">
@@ -584,7 +573,7 @@ try { const s = JSON.parse(localStorage.getItem("wait-filters") || "{}");
   if (DAYS.includes(s.day)) fDay.value = s.day; if (CITIES.includes(s.city)) fCity.value = s.city; } catch (e) {}
 function onFilter() {
   try { localStorage.setItem("wait-filters", JSON.stringify({ day: fDay.value, city: fCity.value })); } catch (e) {}
-  renderHeat(); renderAvg(); renderTurnout(); renderUpdates();
+  renderHeat(); renderAvg(); renderTurnout();
 }
 fDay.onchange = fCity.onchange = onFilter;
 
@@ -750,94 +739,12 @@ function renderTurnout() {
   });
 }
 
-// Site updates. A site's update times are the distinct "last updated" stamps we saw. A gap
-// between two updates only counts if the monitor was polling the whole time; otherwise an
-// update in between could have been missed.
-const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y), h = b.length >> 1;
-  return b.length % 2 ? b[h] : (b[h - 1] + b[h]) / 2; };
-const fmtDur = m => m == null ? "—" : m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, "0")} min`;
+// Polling coverage, for Data notes and for breaking charts where the monitor missed polls.
 function pollGaps(d) {  // [start, end] minute ranges on day d when the monitor wasn't polling
   const ts = [...new Set(ROWS.filter(r => day(r.t) === d).map(r => mins(r.t)))].sort((a, b) => a - b), out = [];
   for (let i = 1; i < ts.length; i++) if (isGap(ts[i - 1], ts[i])) out.push([ts[i - 1], ts[i]]);
   return { first: ts[0], last: ts[ts.length - 1], gaps: out };
 }
-function siteUpdates(site, d) {
-  // Updates stamped on day d, each with the wait it set (from the first poll that saw it).
-  const seen = new Map();
-  ROWS.filter(r => r.site === site && day(r.t) === d && r.u && day(r.u) === d).sort((a, b) => a.t < b.t ? -1 : 1)
-    .forEach(r => { if (!seen.has(r.u)) seen.set(r.u, r); });
-  const ups = [...seen.entries()].map(([u, r]) => ({ m: mins(u), wait: r.wait })).sort((a, b) => a.m - b.m);
-  const pg = pollGaps(d), intervals = [];
-  ups.forEach((x, i) => {
-    if (!i) return;
-    const a = ups[i - 1].m, b = x.m;
-    // Count it only if we were polling throughout (an earlier update could hide behind the first poll or a gap).
-    x.since = pg.gaps.some(([g0, g1]) => g0 < b && g1 > a) || a < pg.first - POLL_GAP ? null : b - a;
-    if (x.since != null) intervals.push(x.since);
-  });
-  return { ups, intervals };
-}
-function estimateAges(rows) {  // minutes between a site's last update and our poll, same day only
-  return rows.filter(r => r.u && day(r.u) === day(r.t)).map(r => mins(r.t) - mins(r.u)).filter(a => a >= 0);
-}
-
-function renderUpdates() {
-  const host = document.getElementById("upd"); host.innerHTML = "";
-  const d = fDay.value, city = fCity.value;
-  const sites = (city ? [city] : CITIES).flatMap(c => Object.keys(siteCity).filter(s => siteCity[s] === c).sort());
-  const per = Object.fromEntries(sites.map(s => [s, siteUpdates(s, d)]));
-  const all = sites.flatMap(s => per[s].intervals);
-  const dayRows = ROWS.filter(r => day(r.t) === d && sites.includes(r.site));
-  const ages = estimateAges(dayRows);
-  document.getElementById("upd-sub").textContent =
-    `${city || "All towns"}, ${fmtDay(d)}. Each tick is a time the site changed or re-confirmed its reported wait time. ` +
-    `Gaps are only measured while the monitor was polling (shaded where it wasn't), so updates less than ` +
-    `${POLL_GAP} min apart can be missed.`;
-  const slow = sites.map(s => [s, median(per[s].intervals)]).filter(x => x[1] != null).sort((a, b) => b[1] - a[1])[0];
-  document.getElementById("upd-kpis").innerHTML = [
-    [fmtDur(median(all)), "typical time between updates"],
-    [ages.length ? Math.round(ages.filter(a => a >= 30).length / ages.length * 100) + "%" : "—", "of polls showed a reported wait time 30+ min old"],
-    ...(slow ? [[fmtDur(slow[1]), `slowest to update (${slow[0]}, typical gap)`]] : []),
-  ].map(([v, k]) => `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
-  if (!dayRows.length) { host.innerHTML = `<p class="empty">No polls for this selection.</p>`; return; }
-
-  const pg = pollGaps(d);
-  const t0 = Math.min(pg.first, ...sites.flatMap(s => per[s].ups.map(u => u.m))), t1 = pg.last;
-  const labelW = Math.min(300, Math.max(180, host.clientWidth * 0.32)), rowH = 18, cityH = 24, colW = 78;
-  const plotW = Math.max(host.clientWidth - labelW - colW * 3 - 8, 200);
-  const span = Math.max(t1 - t0, 1), X = m => labelW + (m - t0) / span * plotW;
-  const lines = [];
-  (city ? [city] : CITIES).forEach(c => { lines.push({ city: c });
-    Object.keys(siteCity).filter(s => siteCity[s] === c).sort().forEach(s => lines.push({ site: s })); });
-  let y = 4; lines.forEach(l => { l.y = y; y += l.city ? cityH : rowH; });
-  const H = y + 22, W = labelW + plotW + colW * 3 + 8;
-  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": `Estimate updates by site on ${fmtDay(d)}` }, host);
-  // Shade before the first poll and during monitor gaps: updates there may be missing.
-  [[t0, pg.first], ...pg.gaps].forEach(([a, b]) => { if (b > a)
-    el("rect", { x: X(a), y: 4, width: X(b) - X(a), height: y - 4, class: "gap", opacity: 0.6 }, svg); });
-  const cx = i => labelW + plotW + colW * (i + 1);
-  lines.forEach((l, i) => {
-    if (l.city) {
-      text(svg, 0, l.y + cityH - 7, l.city, { class: "city" });
-      if (i === 0) ["Updates", "Typical gap", "Longest gap"].forEach((h, j) => text(svg, cx(j), l.y + cityH - 7, h, { "text-anchor": "end" }));
-      return;
-    }
-    const yc = l.y + rowH / 2, u = per[l.site];
-    const name = l.site.length > 38 ? l.site.slice(0, 36) + "…" : l.site;
-    svgSiteLabel(svg, 12, yc + 4, l.site, name);
-    el("line", { x1: labelW, x2: labelW + plotW, y1: yc, y2: yc, stroke: "var(--grid)" }, svg);
-    u.ups.forEach(x => {
-      el("rect", { x: X(x.m) - 1.5, y: l.y + 3, width: 3, height: rowH - 6, rx: 1.5, class: "tick" }, svg);
-      const hit = el("rect", { x: X(x.m) - 5, y: l.y, width: 10, height: rowH, fill: "transparent" }, svg);
-      hover(hit, () => `<b>${l.site}</b>Updated ${clock(x.m)} → ${x.wait}` +
-        (x.since != null ? `<br><span class="m">${fmtDur(x.since)} after the previous update</span>` : ""));
-    });
-    [String(u.ups.length), fmtDur(median(u.intervals)), fmtDur(u.intervals.length ? Math.max(...u.intervals) : null)]
-      .forEach((v, j) => text(svg, cx(j), yc + 4, v, { class: "num", "text-anchor": "end" }));
-  });
-  timeAxis(svg, labelW, plotW, t0, t1, y + 14);
-}
-
 // Typical by time of day: town x half-hour, averaged over every poll on every day.
 (function renderTod() {
   const host = document.getElementById("tod");
@@ -893,7 +800,7 @@ setTimeout(() => { reloadDue = true; if (!document.hidden) location.reload(); },
 document.addEventListener("visibilitychange", () => { if (reloadDue && !document.hidden) location.reload(); });
 
 onFilter();
-let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { renderHeat(); renderAvg(); renderTurnout(); renderUpdates(); }, 150); });
+let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { renderHeat(); renderAvg(); renderTurnout(); }, 150); });
 </script>
 </body>
 </html>
