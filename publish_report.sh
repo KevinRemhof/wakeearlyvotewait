@@ -2,7 +2,7 @@
 # Rebuild the report from the CSV and publish it to GitHub Pages.
 #
 # Meant to run every 20 minutes from launchd (see RUNNING.md). Each run:
-#   - does nothing if the CSV hasn't changed since the last publish
+#   - does nothing if neither the CSV nor visualize_waits.py changed since the last publish
 #   - rebuilds docs/index.html (with State Board turnout)
 #   - retakes docs/report.png once a day, to keep the repo from bloating
 #   - commits only the CSV and docs/, then pushes; Pages updates a minute later
@@ -47,7 +47,11 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK"' EXIT
 
-if git diff --quiet -- "$CSV"; then
+# Publish when there are new readings, or the report code changed since the last publish.
+code_changed() {
+    [[ "$(git log -1 --format=%ct -- visualize_waits.py)" -gt "$(git log -1 --format=%ct -- docs/index.html)" ]]
+}
+if git diff --quiet -- "$CSV" && ! code_changed; then
     log "no new readings in $CSV; nothing to publish"
     exit 0
 fi
