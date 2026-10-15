@@ -885,6 +885,13 @@ function renderUpdates() {
     .map(t => `<li>${t}</li>`).join("");
 })();
 
+// Reload every 5 minutes to pick up republished reports. Filters survive (localStorage) and the
+// browser restores the scroll position. A hidden tab waits until it's viewed again.
+const RELOAD_MS = 5 * 60 * 1000;
+let reloadDue = false;
+setTimeout(() => { reloadDue = true; if (!document.hidden) location.reload(); }, RELOAD_MS);
+document.addEventListener("visibilitychange", () => { if (reloadDue && !document.hidden) location.reload(); });
+
 onFilter();
 let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { renderHeat(); renderAvg(); renderTurnout(); renderUpdates(); }, 150); });
 </script>
