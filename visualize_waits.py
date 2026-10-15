@@ -932,9 +932,8 @@ function renderUpdates() {
         `${gaps.length > 1 ? "those stretches" : "that stretch"} weren't recorded and show as no data)` : "; no gaps");
   });
   const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  document.getElementById("notes").innerHTML = [...(DATA.notes || []).map(esc), ...items,
-    `Polls about every ${POLL_GAP} min; a gap is any stretch over ${POLL_GAP * 3} min without a poll. ` +
-    `Source: ${DATA.sources.map(esc).join(", ")}.`].map(t => `<li>${t}</li>`).join("");
+  document.getElementById("notes").innerHTML = [...(DATA.notes || []).map(esc), ...items]
+    .map(t => `<li>${t}</li>`).join("");
 })();
 
 onFilter();
