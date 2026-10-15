@@ -60,12 +60,17 @@ FALLBACK_SCHEDULE = {
 }
 
 
+DEFAULT_LOG = Path(__file__).with_name("logs") / "scheduler.log"
+LOG_FILE = DEFAULT_LOG  # set from --log in main()
+
+
 def log(msg):
-    print(
-        f"[wrapper {datetime.now(TZ):%Y-%m-%d %H:%M:%S}] {msg}",
-        file=sys.stderr,
-        flush=True,
-    )
+    line = f"[wrapper {datetime.now(TZ):%Y-%m-%d %H:%M:%S}] {msg}"
+    print(line, file=sys.stderr, flush=True)
+    if LOG_FILE:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
 
 
 def parse_clock(text):
@@ -146,6 +151,7 @@ def _raise_interrupt(signum, frame):
 
 
 def main():
+    global LOG_FILE
     signal.signal(
         signal.SIGTERM, _raise_interrupt
     )  # so `kill`/launchd also stop the monitor
@@ -159,11 +165,19 @@ def main():
         help="minutes before open / after close (default 20)",
     )
     p.add_argument(
+        "--log",
+        metavar="FILE",
+        default=str(DEFAULT_LOG),
+        help="also write scheduler messages here (default logs/scheduler.log; "
+        "'' to disable)",
+    )
+    p.add_argument(
         "monitor_args",
         nargs=argparse.REMAINDER,
         help="arguments passed to the monitor (after --)",
     )
     args = p.parse_args()
+    LOG_FILE = Path(args.log) if args.log else None
     monitor_args = (
         args.monitor_args[1:] if args.monitor_args[:1] == ["--"] else args.monitor_args
     )

@@ -14,3 +14,6 @@ waits.csv
 
 # publish_report.sh lock
 .publish.lock/
+
+# Run logs (monitor, scheduler, publish); not published
+logs/

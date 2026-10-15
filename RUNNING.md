@@ -135,8 +135,8 @@ paths changed to match your machine:
   </dict>
   <key>StartInterval</key><integer>1200</integer>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/wakeearlyvotewait-publish.log</string>
-  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/wakeearlyvotewait-publish.log</string>
+  <key>StandardOutPath</key><string>/path/to/wakeearlyvotewait/logs/publish.log</string>
+  <key>StandardErrorPath</key><string>/path/to/wakeearlyvotewait/logs/publish.log</string>
 </dict>
 </plist>
 ```
@@ -146,11 +146,28 @@ Then:
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rtphokie.wakeearlyvotewait.publish.plist
 launchctl kickstart -k gui/$(id -u)/com.rtphokie.wakeearlyvotewait.publish   # run now
-tail -f ~/Library/Logs/wakeearlyvotewait-publish.log                          # watch it
+tail -f logs/publish.log                                                      # watch it
 launchctl bootout gui/$(id -u)/com.rtphokie.wakeearlyvotewait.publish         # stop it
 ```
 
 Pushing uses your `gh` login (`gh auth login`), so no other credentials are needed.
+
+## Logs
+
+Each script logs to `logs/`, which isn't committed:
+
+| Log | What's in it |
+|---|---|
+| `logs/monitor.log` | Monitor start/stop, every poll (`poll ok: 18 sites; changed: Cary Senior Center 15-30 Minutes -> 30-60 Minutes`), and fetch errors |
+| `logs/scheduler.log` | `run_during_early_voting.py` starting, stopping and restarting the monitor around voting hours |
+| `logs/publish.log` | Every publish run: skipped (no new readings), published (with the commit), or failed (with the line) |
+
+Use `--log FILE` to log somewhere else, or `--log ''` to turn logging off, for the
+monitor and the scheduler.
+
+```sh
+tail -f logs/*.log
+```
 
 ## Development
 

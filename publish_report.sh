@@ -6,6 +6,7 @@
 #   - rebuilds docs/index.html (with State Board turnout)
 #   - retakes docs/report.png once a day, to keep the repo from bloating
 #   - commits only the CSV and docs/, then pushes; Pages updates a minute later
+#   - logs what it did to logs/publish.log
 # After END_DATE it unloads its own launchd job and exits.
 #
 # Settings come from the environment (set them in the launchd plist):
@@ -27,7 +28,15 @@ END_DATE=${END_DATE:-2026-11-01}
 LABEL=${LABEL:-com.rtphokie.wakeearlyvotewait.publish}
 SHOT_HEIGHT=3800 # tall enough for the whole page; any extra is page background
 
+# Log every run to logs/publish.log (also shown on screen when run by hand).
+mkdir -p logs
+if [[ -t 1 ]]; then
+    exec > >(tee -a logs/publish.log) 2>&1
+else
+    exec >>logs/publish.log 2>&1
+fi
 log() { echo "[publish $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+trap 'log "FAILED at line $LINENO (exit $?)"' ERR
 
 if [[ "$(date +%F)" > "$END_DATE" ]]; then
     log "past $END_DATE; unloading $LABEL"

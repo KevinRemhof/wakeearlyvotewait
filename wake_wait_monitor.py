@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.request
 from datetime import UTC, datetime
+from pathlib import Path
 
 APP_ID = "appAL6KsUEvshj4br"
 SHARE_ID = "shrQkIIFla4bjdGzh"
@@ -184,6 +185,28 @@ def append_csv(path, sites, polled_at):
             )
 
 
+DEFAULT_LOG = Path(__file__).with_name("logs") / "monitor.log"
+
+
+def log_line(path, msg):
+    """Append a timestamped line to the log file (no-op if path is empty)."""
+    if not path:
+        return
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(f"[{datetime.now().astimezone():%Y-%m-%d %H:%M:%S}] {msg}\n")
+
+
+def describe_changes(sites, previous):
+    """'Cary Senior Center 15-30 Minutes -> 30-60 Minutes; ...' for sites whose wait changed."""
+    return "; ".join(
+        f"{s['name']} {previous[s['name']]} -> {s['wait']}"
+        for s in sites
+        if s["name"] in previous and previous[s["name"]] != s["wait"]
+    )
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Monitor Wake County, NC early voting wait times."
@@ -202,7 +225,19 @@ def main():
         "--site", metavar="TEXT", help="only show sites whose name contains TEXT"
     )
     p.add_argument("--no-color", action="store_true", help="disable ANSI colors")
+    p.add_argument(
+        "--log",
+        metavar="FILE",
+        default=str(DEFAULT_LOG),
+        help="log each poll, change and error here (default logs/monitor.log; "
+        "'' to disable)",
+    )
     args = p.parse_args()
+    log_line(
+        args.log,
+        f"monitor started (pid {os.getpid()}, interval {args.interval}s, "
+        f"csv {args.csv or 'none'})",
+    )
 
     use_color = sys.stdout.isatty() and not args.no_color and not args.json
     previous = {}
@@ -221,8 +256,15 @@ def main():
                 print_table(sites, previous, use_color)
             else:
                 print("No matching sites.")
+            changes = describe_changes(sites, previous)
+            log_line(
+                args.log,
+                f"poll ok: {len(sites)} sites"
+                + (f"; changed: {changes}" if changes else "; no changes"),
+            )
             previous = {s["name"]: s["wait"] for s in sites}
         except Exception as e:  # keep monitoring through transient network/API errors
+            log_line(args.log, f"poll failed: {e}")
             if args.once:
                 raise
             print(f"[{datetime.now():%H:%M:%S}] fetch failed: {e}", file=sys.stderr)
@@ -233,6 +275,7 @@ def main():
             time.sleep(args.interval)
         except KeyboardInterrupt:
             break
+    log_line(args.log, "monitor stopped")
 
 
 if __name__ == "__main__":
