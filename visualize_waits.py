@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an HTML report of Wake County early voting wait times from the CSV
+"""Build an HTML report of Wake County early voting reported wait times from the CSV
 written by wake_wait_monitor.py --csv, alongside early voting turnout from the
 NC State Board of Elections.
 
@@ -7,10 +7,10 @@ The report is a single self-contained HTML file (no network needed to view it):
   * Right now       - every site's latest reported wait, grouped by town
   * Through the day - site x time heatmap for one day, rows grouped by town,
                       with that day's early votes per site
-  * Average wait    - mean estimated wait across sites over the day
+  * Average wait    - mean reported wait time across sites over the day
   * Turnout by day  - early votes cast per day (State Board data)
-  * Update frequency - when each site updated its estimate, typical and longest
-                      gaps between updates, and how stale estimates were
+  * Update frequency - when each site updated its reported wait time, typical and
+                      longest gaps between updates, and how stale they were
   * Typical by hour - town x half-hour heatmap averaged over every day collected
   * Site summary    - sortable table (also the accessible view of the data)
   * Data notes      - each day's polling window and any gaps when the monitor wasn't
@@ -354,7 +354,7 @@ TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wake Early Voting Waits</title>
+<title>Wake Reported Wait Times</title>
 <style>
 :root {
   color-scheme: light;
@@ -442,7 +442,7 @@ td.num, th.num { text-align: right; }
 </head>
 <body>
 <main>
-  <h1>Wake County early voting wait times</h1>
+  <h1>Wake County early voting reported wait times</h1>
   <p class="sub" id="meta"></p>
   <p class="links" id="links"></p>
 
@@ -465,7 +465,7 @@ td.num, th.num { text-align: right; }
   </section>
 
   <section class="card" aria-labelledby="h-avg">
-    <h2 id="h-avg">Average estimated wait</h2>
+    <h2 id="h-avg">Average reported wait time</h2>
     <p class="sub" id="avg-sub"></p>
     <div class="kpis" id="kpis"></div>
     <div id="avg"></div>
@@ -479,14 +479,14 @@ td.num, th.num { text-align: right; }
   </section>
 
   <section class="card" aria-labelledby="h-upd">
-    <h2 id="h-upd">How often sites update their estimate</h2>
+    <h2 id="h-upd">How often sites update their reported wait time</h2>
     <p class="sub" id="upd-sub"></p>
     <div class="kpis" id="upd-kpis"></div>
     <div class="scroll" id="upd"></div>
   </section>
 
   <section class="card" aria-labelledby="h-tod">
-    <h2 id="h-tod">Typical wait by time of day, by town</h2>
+    <h2 id="h-tod">Typical reported wait time by time of day, by town</h2>
     <p class="sub" id="tod-sub"></p>
     <div class="scroll" id="tod"></div>
   </section>
@@ -635,7 +635,7 @@ function renderHeat() {
   let y = top; lines.forEach(l => { l.y = y; y += l.city ? cityH : rowH; });
   const H = y + 22;
   const svg = el("svg", { width: labelW + plotW + votesW + 8, height: H, role: "img",
-    "aria-label": `Wait times by site on ${fmtDay(d)}` }, host);
+    "aria-label": `Reported wait times by site on ${fmtDay(d)}` }, host);
   const vx = labelW + plotW + votesW;
   lines.forEach((l, i) => {
     if (l.city) {
@@ -660,7 +660,7 @@ function renderHeat() {
   timeAxis(svg, labelW, plotW * span / (span + gap), t0, t1, axisY);
 }
 
-// Average estimated wait across sites (midpoint of each range), per poll.
+// Average reported wait time across sites (midpoint of each range), per poll.
 function renderAvg() {
   const host = document.getElementById("avg"); host.innerHTML = "";
   const d = fDay.value, city = fCity.value;
@@ -677,14 +677,14 @@ function renderAvg() {
   kp.innerHTML = [
     [fmtMin(mean(pts.map(p => p.v))), "average over the day"],
     [`${fmtMin(peak.v)} at ${clock(peak.m)}`, "busiest poll"],
-    [worst.wait.replace(/ Minutes?/i, " min"), `longest single wait (${worst.site}, ${clock(mins(worst.t))})`],
+    [worst.wait.replace(/ Minutes?/i, " min"), `longest reported wait (${worst.site}, ${clock(mins(worst.t))})`],
   ].map(([v, k]) => `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 
   const W = Math.max(host.clientWidth, 320), H = 200, L = 40, R = 12, T = 10, B = 24;
   const t0 = pts[0].m, t1 = pts[pts.length - 1].m, span = Math.max(t1 - t0, 1);
   const vmax = Math.max(15, Math.ceil(Math.max(...pts.map(p => p.v)) / 15) * 15);
   const X = m => L + (m - t0) / span * (W - L - R), Y = v => T + (1 - v / vmax) * (H - T - B);
-  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Average estimated wait over the day" }, host);
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Average reported wait time over the day" }, host);
   for (let v = 0; v <= vmax; v += 15) {
     el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v ? "var(--grid)" : "var(--axis)" }, svg);
     text(svg, L - 6, Y(v) + 4, v + "m", { "text-anchor": "end" });
@@ -802,13 +802,13 @@ function renderUpdates() {
   const dayRows = ROWS.filter(r => day(r.t) === d && sites.includes(r.site));
   const ages = estimateAges(dayRows);
   document.getElementById("upd-sub").textContent =
-    `${city || "All towns"}, ${fmtDay(d)}. Each tick is a time the site changed or re-confirmed its estimate. ` +
+    `${city || "All towns"}, ${fmtDay(d)}. Each tick is a time the site changed or re-confirmed its reported wait time. ` +
     `Gaps are only measured while the monitor was polling (shaded where it wasn't), so updates less than ` +
     `${POLL_GAP} min apart can be missed.`;
   const slow = sites.map(s => [s, median(per[s].intervals)]).filter(x => x[1] != null).sort((a, b) => b[1] - a[1])[0];
   document.getElementById("upd-kpis").innerHTML = [
     [fmtDur(median(all)), "typical time between updates"],
-    [ages.length ? Math.round(ages.filter(a => a >= 30).length / ages.length * 100) + "%" : "—", "of polls showed an estimate 30+ min old"],
+    [ages.length ? Math.round(ages.filter(a => a >= 30).length / ages.length * 100) + "%" : "—", "of polls showed a reported wait time 30+ min old"],
     ...(slow ? [[fmtDur(slow[1]), `slowest to update (${slow[0]}, typical gap)`]] : []),
   ].map(([v, k]) => `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
   if (!dayRows.length) { host.innerHTML = `<p class="empty">No polls for this selection.</p>`; return; }
@@ -855,7 +855,7 @@ function renderUpdates() {
   const host = document.getElementById("tod");
   const ok = ROWS.filter(r => r.min != null);
   document.getElementById("tod-sub").textContent =
-    `Mean estimated wait in each half hour across all ${DAYS.length} day${DAYS.length > 1 ? "s" : ""} collected and all sites in the town. ` +
+    `Mean reported wait time in each half hour across all ${DAYS.length} day${DAYS.length > 1 ? "s" : ""} collected and all sites in the town. ` +
     (DAYS.length < 3 ? "This view gets more useful as more days are collected." : "");
   if (!ok.length) { host.innerHTML = `<p class="empty">No data.</p>`; return; }
   const slot = m => Math.floor(m / 30) * 30;
@@ -865,7 +865,7 @@ function renderUpdates() {
   const labelW = 130, rowH = 22, top = 4;
   const cw = Math.max(18, Math.min(44, (host.clientWidth - labelW - 8) / cols));
   const W = labelW + cols * cw + 8, H = top + CITIES.length * rowH + 22;
-  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Typical wait by town and time of day" }, host);
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Typical reported wait time by town and time of day" }, host);
   CITIES.forEach((c, i) => {
     const y = top + i * rowH;
     text(svg, 0, y + rowH / 2 + 4, `${c} (${cityCount[c]})`, { class: "lbl" });
@@ -902,10 +902,10 @@ function renderUpdates() {
   const pct = v => v == null ? "—" : Math.round(v * 100) + "%";
   const cols = [
     ["site", "Site", r => siteLink(r.site)], ["city", "Town", r => r.city],
-    ["latestMin", "Latest", r => r.latest, 1], ["avg", "Avg wait", r => fmtMin(r.avg), 1],
+    ["latestMin", "Latest", r => r.latest, 1], ["avg", "Avg reported wait", r => fmtMin(r.avg), 1],
     ["peak", "Peak (midpoint)", r => fmtMin(r.peak), 1], ["long", "Polls at 30+ min", r => pct(r.long), 1],
     ["none", "Polls with no wait", r => pct(r.none), 1],
-    ["gap", "Typical update gap", r => fmtDur(r.gap), 1], ["age", "Typical estimate age", r => fmtDur(r.age), 1],
+    ["gap", "Typical update gap", r => fmtDur(r.gap), 1], ["age", "Typical age of reported wait", r => fmtDur(r.age), 1],
     ...(TURN ? [["votes", "Early votes", r => fmtN(r.votes), 1]] : []),
   ];
   let key = "avg", dir = -1;
@@ -928,7 +928,7 @@ function renderUpdates() {
     const pg = pollGaps(d);
     const gaps = pg.gaps.map(([a, b]) => `${clock(a)}–${clock(b)}`);
     return `<b>${fmtDay(d)}:</b> polled ${clock(pg.first)}–${clock(pg.last)}` +
-      (gaps.length ? `; no polls ${gaps.join(", ")} (the monitor wasn't running, so waits and site updates in ` +
+      (gaps.length ? `; no polls ${gaps.join(", ")} (the monitor wasn't running, so reported wait times and site updates in ` +
         `${gaps.length > 1 ? "those stretches" : "that stretch"} weren't recorded and show as no data)` : "; no gaps");
   });
   const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);

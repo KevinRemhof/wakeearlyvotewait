@@ -4,7 +4,7 @@ Requires Python 3.11 or newer and nothing else; every script uses only the
 standard library. You can run the scripts with `python3 script.py`, as
 `./script.py`, or with `uv run script.py`.
 
-## 1. Collect wait times
+## 1. Collect reported wait times
 
 Check the tracker once:
 
@@ -28,7 +28,7 @@ Poll every 5 minutes and save every reading:
 | `--no-color` | No ANSI colors |
 
 The table is sorted by city, then longest wait first. **Updated** shows how long
-ago each site last changed its estimate. When a site's wait changes, the row
+ago each site last changed its reported wait time. When a site's wait changes, the row
 shows what it was before.
 
 ### Only during voting hours
