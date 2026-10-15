@@ -1,0 +1,13 @@
+__pycache__/
+.DS_Store
+.ruff_cache/
+
+# State Board absentee files list individual voters by name; never commit them.
+ncsbe_cache/
+
+# Ad hoc report output (the published report lives in docs/)
+waits_report.html
+report.html
+
+# Superseded by 2026-10-15_to_2026_10-31.csv, which includes all of its rows
+waits.csv
