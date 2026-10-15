@@ -47,6 +47,8 @@ from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from run_during_early_voting import FALLBACK_SCHEDULE, parse_clock
+
 TZ = ZoneInfo("America/New_York")
 BANDS = ["No wait", "Under 15 min", "15–30 min", "30–60 min", "Over 60 min"]
 
@@ -332,6 +334,12 @@ def main():
         "addresses": addresses,
         "links": {"tracker": TRACKER_URL, "county": COUNTY_URL, "ncsbe": NCSBE_URL},
         "sources": [s.name for s in srcs],
+        # Closing time per day, minutes after midnight, for "polls close at" in Right now.
+        "closes": {
+            d.isoformat(): h * 60 + m
+            for d, (_, close) in FALLBACK_SCHEDULE.items()
+            for h, m in [parse_clock(close)]
+        },
         "generated": datetime.now(TZ).strftime("%a %b %-d, %Y %-I:%M %p"),
     }
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
@@ -389,6 +397,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 16px; margin: 0 0 2px; }
 .sub { color: var(--ink-2); margin: 0 0 12px; }
+.closes { font-weight: 600; margin: -4px 0 8px; }
 .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
   padding: 16px; margin-top: 16px; }
 .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
@@ -438,6 +447,7 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
 
   <section class="card" aria-labelledby="h-now">
     <h2 id="h-now">Right now</h2>
+    <p class="closes" id="now-closes" hidden></p>
     <p class="sub" id="now-sub"></p>
     <div class="now" id="now"></div>
   </section>
@@ -555,6 +565,11 @@ document.getElementById("links").innerHTML =
   const latest = {};
   ROWS.forEach(r => { if (!latest[r.site] || r.t > latest[r.site].t) latest[r.site] = r; });
   document.getElementById("now-sub").textContent = `As of ${fmtDay(day(last))} ${clock(mins(last))}. Towns ordered by number of sites.`;
+  // Today's closing time, judged by the viewer's clock in Eastern time (the page is static).
+  const nowET = new Date().toLocaleString("sv-SE", { timeZone: "America/New_York" }),
+    close = (DATA.closes || {})[nowET.slice(0, 10)];
+  if (close != null) { const c = document.getElementById("now-closes");
+    c.textContent = `Polls ${mins(nowET) < close ? "close" : "closed"} at ${clock(close)} today`; c.hidden = false; }
   const box = document.getElementById("now");
   box.innerHTML = CITIES.map(c => {
     const sites = Object.values(latest).filter(r => r.city === c)
