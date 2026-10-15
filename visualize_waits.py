@@ -12,7 +12,6 @@ The report is a single self-contained HTML file (no network needed to view it):
   * Update frequency - when each site updated its reported wait time, typical and
                       longest gaps between updates, and how stale they were
   * Typical by hour - town x half-hour heatmap averaged over every day collected
-  * Site summary    - sortable table (also the accessible view of the data)
   * Data notes      - each day's polling window and any gaps when the monitor wasn't
                       running, plus notes given with --note
 
@@ -425,11 +424,6 @@ a:hover { text-decoration-color: currentColor; }
 svg a:hover text { fill: var(--line); text-decoration: underline; }
 .site .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .site .w { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
-th { color: var(--ink-2); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none;
-  white-space: normal; vertical-align: bottom; }
-td.num, th.num { text-align: right; }
 #tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink);
   border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; font-size: 12px;
   box-shadow: 0 4px 16px rgba(0,0,0,.15); display: none; z-index: 10; max-width: 280px; }
@@ -491,11 +485,6 @@ td.num, th.num { text-align: right; }
     <div class="scroll" id="tod"></div>
   </section>
 
-  <section class="card" aria-labelledby="h-tbl">
-    <h2 id="h-tbl">Site summary</h2>
-    <p class="sub" id="tbl-sub"></p>
-    <div class="scroll"><table id="tbl"></table></div>
-  </section>
   <section class="card notes" aria-labelledby="h-notes">
     <h2 id="h-notes">Data notes</h2>
     <ul id="notes"></ul>
@@ -880,45 +869,6 @@ function renderUpdates() {
     const m = s0 + j * 30;
     if (m % 60 === 0 && (cw >= 30 || m % 120 === 0)) text(svg, labelW + j * cw, H - 6, clock(m), { "text-anchor": "start" });
   }
-})();
-
-// Site summary table (sortable), across all collected data.
-(function renderTable() {
-  const by = {};
-  ROWS.forEach(r => (by[r.site] = by[r.site] || []).push(r));
-  const recs = Object.entries(by).map(([site, rs]) => {
-    rs.sort((a, b) => a.t < b.t ? -1 : 1);
-    const vals = rs.filter(r => r.min != null);
-    const latest = rs[rs.length - 1];
-    return { site, city: siteCity[site], latest: latest.wait, latestMin: latest.min ?? -1,
-      avg: mean(vals.map(r => r.min)), peak: vals.length ? Math.max(...vals.map(r => r.min)) : null,
-      long: vals.length ? vals.filter(r => r.min >= 30).length / vals.length : null,
-      none: vals.length ? vals.filter(r => r.min === 0).length / vals.length : null,
-      votes: VOTES[site] ? Object.values(VOTES[site]).reduce((a, n) => a + n, 0) : null,
-      gap: median(DAYS.flatMap(d => siteUpdates(site, d).intervals)), age: median(estimateAges(rs)) };
-  });
-  document.getElementById("tbl-sub").textContent = `All ${DAYS.length} day${DAYS.length > 1 ? "s" : ""}. Click a column to sort.`;
-  const pct = v => v == null ? "—" : Math.round(v * 100) + "%";
-  const cols = [
-    ["site", "Site", r => siteLink(r.site)], ["city", "Town", r => r.city],
-    ["latestMin", "Latest", r => r.latest, 1], ["avg", "Avg reported wait", r => fmtMin(r.avg), 1],
-    ["peak", "Peak (midpoint)", r => fmtMin(r.peak), 1], ["long", "Polls at 30+ min", r => pct(r.long), 1],
-    ["none", "Polls with no wait", r => pct(r.none), 1],
-    ["gap", "Typical update gap", r => fmtDur(r.gap), 1], ["age", "Typical age of reported wait", r => fmtDur(r.age), 1],
-    ...(TURN ? [["votes", "Early votes", r => fmtN(r.votes), 1]] : []),
-  ];
-  let key = "avg", dir = -1;
-  const tbl = document.getElementById("tbl");
-  function draw() {
-    recs.sort((a, b) => { const x = a[key] ?? -1, y = b[key] ?? -1;
-      return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir; });
-    tbl.innerHTML = `<thead><tr>${cols.map(([k, h, , n]) =>
-      `<th data-k="${k}" class="${n ? "num" : ""}" aria-sort="${k === key ? (dir > 0 ? "ascending" : "descending") : "none"}">${h}${k === key ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead>` +
-      `<tbody>${recs.map(r => `<tr>${cols.map(([k, , f, n]) => `<td class="${n ? "num" : ""}">${f(r)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-    tbl.querySelectorAll("th").forEach(th => th.onclick = () => {
-      const k = th.dataset.k; dir = k === key ? -dir : (k === "site" || k === "city" ? 1 : -1); key = k; draw(); });
-  }
-  draw();
 })();
 
 // Data notes: polling coverage per day (gaps found automatically) plus --note text.

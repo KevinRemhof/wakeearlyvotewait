@@ -35,7 +35,6 @@ The report includes:
 - **How often sites update their reported wait time:** when each site updated,
   typical and longest gaps between updates, and how stale reported wait times were.
 - **Typical wait by time of day, by town:** averaged over every day collected.
-- **Site summary:** a sortable table of all of the above.
 - **Data notes:** each day's polling window and any gaps when the monitor wasn't
   running. For example, there were no polls on Thursday morning, Oct 15, from
   9:10 to 11:02 AM.
