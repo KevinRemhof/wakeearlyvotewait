@@ -11,3 +11,6 @@ report.html
 
 # Superseded by 2026-10-15_to_2026_10-31.csv, which includes all of its rows
 waits.csv
+
+# publish_report.sh lock
+.publish.lock/

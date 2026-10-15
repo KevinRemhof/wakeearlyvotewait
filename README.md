@@ -47,6 +47,7 @@ The report includes:
 | `wake_wait_monitor.py` | Polls the county tracker, prints a table, and appends each reading to a CSV |
 | `run_during_early_voting.py` | Keeps the monitor running only during early voting hours |
 | `visualize_waits.py` | Builds the HTML report from one or more CSVs, plus State Board turnout |
+| `publish_report.sh` | Rebuilds and pushes the report; run every 20 minutes by launchd |
 | `2026-10-15_to_2026_10-31.csv` | Every reading collected, starting Thu Oct 15 at 8:45 AM |
 | `docs/index.html`, `docs/report.png` | The latest report and a screenshot of it |
 | `RUNNING.md` | How to run everything |

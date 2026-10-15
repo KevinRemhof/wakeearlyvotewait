@@ -109,6 +109,49 @@ Adjust the screenshot height if the page grows. After you push, GitHub Pages
 publishes `docs/` to https://rtphokie.github.io/wakeearlyvotewait/ within a minute
 or two.
 
+### Automatically, every 20 minutes
+
+`publish_report.sh` rebuilds the report and pushes it. It skips the run if the CSV
+hasn't changed since the last publish, retakes the screenshot once a day, and
+commits only the CSV and `docs/`. It runs from launchd, so it catches up after the
+Mac sleeps. After `END_DATE` (Nov 1) it unloads its own job.
+
+Install it by saving this as
+`~/Library/LaunchAgents/com.rtphokie.wakeearlyvotewait.publish.plist`, with the
+paths changed to match your machine:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.rtphokie.wakeearlyvotewait.publish</string>
+  <key>ProgramArguments</key>
+  <array><string>/path/to/wakeearlyvotewait/publish_report.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHON</key><string>/path/to/python3.11</string>
+  </dict>
+  <key>StartInterval</key><integer>1200</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/wakeearlyvotewait-publish.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/wakeearlyvotewait-publish.log</string>
+</dict>
+</plist>
+```
+
+Then:
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rtphokie.wakeearlyvotewait.publish.plist
+launchctl kickstart -k gui/$(id -u)/com.rtphokie.wakeearlyvotewait.publish   # run now
+tail -f ~/Library/Logs/wakeearlyvotewait-publish.log                          # watch it
+launchctl bootout gui/$(id -u)/com.rtphokie.wakeearlyvotewait.publish         # stop it
+```
+
+Pushing uses your `gh` login (`gh auth login`), so no other credentials are needed.
+
 ## Development
 
 ```sh
