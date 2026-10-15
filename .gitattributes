@@ -1,0 +1,2 @@
+# csv.writer writes CRLF line endings; store LF in git, keep CRLF on disk
+*.csv text eol=crlf
