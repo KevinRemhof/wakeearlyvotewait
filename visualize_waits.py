@@ -743,7 +743,7 @@ const CITIES = Object.keys(cityCount).sort((a, b) => cityCount[b] - cityCount[a]
 const DAYS = [...new Set(ROWS.map(r => day(r.t)))].sort();
 const SLOT = 15;
 // Averaged days for the Day picker: every day, and weekdays, Saturdays and Sundays separately, since
-// their hours and crowds differ. Only kinds with data are offered.
+// their hours and crowds differ.
 const dow = d => new Date(d + "T12:00").getDay();
 const AVG_KINDS = {
   avg: { label: "Average day", noun: "day", has: d => true },
@@ -782,7 +782,10 @@ function slotReadings(size, days = DAYS) {
   }
   return { per, s0, s1 };
 }
-const AVGS = {}; for (const k in AVG_KINDS) if (kindDays(k).length) AVGS[k] = slotReadings(SLOT, kindDays(k));
+// A weekday, Saturday or Sunday average only shows once it differs from the overall one, e.g. no
+// "Average weekday" until the first weekend day is collected.
+const AVGS = {}; for (const k in AVG_KINDS) { const n = kindDays(k).length;
+  if (k === "avg" ? n : n && n < DAYS.length) AVGS[k] = slotReadings(SLOT, kindDays(k)); }
 const avgVotes = (s, k) => { const v = Object.entries(VOTES[s] || {}).filter(([d]) => AVG_KINDS[k].has(d)).map(([, n]) => n);
   return v.length ? Math.round(mean(v)) : null; };
 
