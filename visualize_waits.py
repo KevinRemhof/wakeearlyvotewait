@@ -525,6 +525,7 @@ def main():
             "tracker": TRACKER_URL,
             "county": COUNTY_URL,
             "countyTurnout": COUNTY_ELECTION_URL,
+            "countyPdf": COUNTY_TURNOUT_URL,
             "ncsbe": NCSBE_URL,
         },
         "sources": [s.name for s in srcs],
@@ -802,7 +803,8 @@ document.getElementById("legend").innerHTML = BANDS.map((b, i) =>
 
 document.getElementById("links").innerHTML =
   `<a href="${LINKS.tracker}" target="_blank" rel="noopener">Live wait tracker ↗</a>` +
-  `<a href="${LINKS.county}" target="_blank" rel="noopener">Early voting sites &amp; hours ↗</a>`;
+  `<a href="${LINKS.county}" target="_blank" rel="noopener">Early voting sites &amp; hours ↗</a>` +
+  `<a href="${LINKS.countyPdf}" target="_blank" rel="noopener">Unofficial turnout report (Wake County BOE) ↗</a>`;
 
 // Right now: latest poll per site, grouped by town, worst first within the town.
 (function renderNow() {
