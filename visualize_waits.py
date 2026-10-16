@@ -59,6 +59,7 @@ BANDS = ["No wait", "Under 15 min", "15–30 min", "30–60 min", "Over 60 min"]
 TRACKER_URL = "https://airtable.com/appAL6KsUEvshj4br/shrQkIIFla4bjdGzh"
 COUNTY_URL = "https://wakevotesearly.com"
 NCSBE_URL = "https://www.ncsbe.gov/results-data/absentee-and-provisional-data"
+VOTER_LOOKUP_URL = "https://vt.ncsbe.gov/RegLkup/"
 ELECTION = "20261103"
 # Earlier general election to compare daily turnout with, matched by day of early voting.
 PRIOR_ELECTION = "20221108"
@@ -526,6 +527,7 @@ def main():
             "county": COUNTY_URL,
             "countyTurnout": COUNTY_ELECTION_URL,
             "countyPdf": COUNTY_TURNOUT_URL,
+            "voterLookup": VOTER_LOOKUP_URL,
             "ncsbe": NCSBE_URL,
         },
         "sources": [s.name for s in srcs],
@@ -606,6 +608,7 @@ h2 { font-size: 16px; margin: 0 0 2px; }
 select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
   border-radius: 6px; padding: 4px 8px; }
 .foot { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+.disclaimer { color: var(--muted); font-size: 12px; text-align: center; margin: 24px 0 0; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 8px 0 4px; }
 .legend.pick button { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 2px 0; cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px; }
@@ -690,6 +693,9 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
     <div class="scroll" id="tod"></div>
     <p class="foot">Sites post when their wait changes, so a reading stands from the time it was posted until the next post, and a site's first post of the day covers the time back to opening.</p>
   </section>
+
+  <footer class="disclaimer">This page uses data from the Wake County Board of Elections and the North Carolina
+    State Board of Elections but is not affiliated with or endorsed by either.</footer>
 </main>
 <div id="tip" role="tooltip"></div>
 <script>
@@ -804,7 +810,8 @@ document.getElementById("legend").innerHTML = BANDS.map((b, i) =>
 document.getElementById("links").innerHTML =
   `<a href="${LINKS.tracker}" target="_blank" rel="noopener">Live wait tracker ↗</a>` +
   `<a href="${LINKS.county}" target="_blank" rel="noopener">Early voting sites &amp; hours ↗</a>` +
-  `<a href="${LINKS.countyPdf}" target="_blank" rel="noopener">Unofficial turnout report (Wake County BOE) ↗</a>`;
+  `<a href="${LINKS.countyPdf}" target="_blank" rel="noopener">Unofficial turnout report (Wake County BOE) ↗</a>` +
+  `<a href="${LINKS.voterLookup}" target="_blank" rel="noopener">Voter lookup &amp; ballot status ↗</a>`;
 
 // Right now: latest poll per site, grouped by town, worst first within the town.
 (function renderNow() {
