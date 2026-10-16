@@ -311,6 +311,21 @@ def main():
                 rows.append(r)
     if not rows:
         sys.exit(f"no rows in {', '.join(map(str, srcs))}")
+    # The monitor polls a little before opening and after closing; those polls aren't
+    # missing data, just closed sites, so leave them out of every chart.
+    hours = {
+        d.isoformat(): tuple(h * 60 + m for h, m in map(parse_clock, oc))
+        for d, oc in FALLBACK_SCHEDULE.items()
+    }
+    rows = [
+        r
+        for r in rows
+        if r["t"][:10] not in hours
+        or hours[r["t"][:10]][0] <= int(r["t"][11:13]) * 60 + int(r["t"][14:16])
+        < hours[r["t"][:10]][1]
+    ]
+    if not rows:
+        sys.exit("no rows during polling hours")
     odd = sorted({r["wait"] for r in rows if r["min"] is None})
     if odd:
         print(
