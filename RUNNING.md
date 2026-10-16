@@ -1,7 +1,8 @@
 # Running it
 
-Requires Python 3.11 or newer and nothing else; every script uses only the
-standard library. You can run the scripts with `python3 script.py`, as
+Requires Python 3.11 or newer; every script uses only the standard library.
+The report's county turnout also needs `pdftotext` from poppler
+(`brew install poppler`); without it the report uses State Board turnout only. You can run the scripts with `python3 script.py`, as
 `./script.py`, or with `uv run script.py`.
 
 ## 1. Collect reported wait times
@@ -68,20 +69,29 @@ The monitor and the wrapper stop if the terminal closes; use `tmux`/`screen`,
 | `-o FILE` | Output HTML (default `waits_report.html` next to the first CSV) |
 | `--open` | Open the report in a browser |
 | `--note TEXT` | Add a line to the report's Data notes (repeatable). Gaps in polling are listed automatically. |
-| `--no-turnout` | Skip the State Board turnout data |
+| `--no-turnout` | Skip the county and State Board turnout data |
 | `--election YYYYMMDD` | Election to get turnout for (default `20261103`) |
 
 The report is one self-contained HTML file and works offline.
 
-**Turnout.** Each run downloads the State Board's statewide absentee file into
-`ncsbe_cache/`, but only when the State Board has posted a newer copy (about once
-a day, early morning). The file grows over early voting; the 2024 General
-Election's final file was about 200 MB. Each day's votes appear the following
-morning. Delete `ncsbe_cache/` whenever you like.
+**Turnout.** Each run downloads two files into `ncsbe_cache/`, each only when
+there's a newer copy:
 
-**Site names.** The State Board and the county tracker name sites differently,
+- The county's [unofficial early voting turnout PDF](https://www.wake.gov/departments-government/board-elections/election-information/2026-general-election),
+  refreshed each evening with votes per site per day. This is the main source,
+  so each day's votes appear the same evening. The script reads the table on
+  its first page with `pdftotext -layout`; if the county changes the layout, it
+  prints a warning and falls back to the State Board.
+- The State Board's statewide absentee file, refreshed about once a day, early
+  morning. It's used for any day the county file doesn't have. The file grows
+  over early voting; the 2024 General Election's final file was about 200 MB.
+
+Each run prints both sources' totals for any day they both have. Delete
+`ncsbe_cache/` whenever you like.
+
+**Site names.** The turnout files and the county tracker name sites differently,
 so the script matches them by distinctive words, including the town. Each run
-prints every pairing and any State Board site it couldn't match. If a pairing
+prints every pairing and any turnout site it couldn't match. If a pairing
 is wrong or missing, add it to `SITE_ALIASES` near the top of
 `visualize_waits.py`:
 

@@ -3,7 +3,7 @@
 #
 # Meant to run every 20 minutes from launchd (see RUNNING.md). Each run:
 #   - does nothing if neither the CSV nor visualize_waits.py changed since the last publish
-#   - rebuilds docs/index.html (with State Board turnout)
+#   - rebuilds docs/index.html (with county and State Board turnout)
 #   - retakes docs/report.png once a day, to keep the repo from bloating
 #   - commits only the CSV and docs/, then pushes; Pages updates a minute later
 #   - logs what it did to logs/publish.log

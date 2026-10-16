@@ -8,7 +8,7 @@ The report is a single self-contained HTML file (no network needed to view it):
   * Through the day - site x time heatmap for one day, rows grouped by town,
                       with that day's early votes per site
   * Average wait    - mean reported wait time across sites over the day
-  * Turnout by day  - early votes cast per day (State Board data)
+  * Turnout by day  - early votes cast per day (county and State Board data)
   * Typical by hour - town x half-hour heatmap averaged over every day collected
   * Data notes      - each day's polling window and any gaps when the monitor wasn't
                       running, plus notes given with --note
@@ -19,9 +19,13 @@ as its lower bound; for color each wait falls in one of five bands, the last
 being "Over 60 min" so longer choices the county may add are still handled.
 Labels that can't be read as a time are reported when the script runs.
 
-Turnout comes from the State Board's statewide absentee file, which is
-refreshed each morning with the previous day's early votes. It is downloaded
-to ncsbe_cache/ and only fetched again when the State Board has a newer copy.
+Turnout comes from the Wake County Board of Elections' unofficial early voting
+turnout PDF, which the county refreshes each evening with votes per site per day.
+Reading it needs pdftotext (poppler: brew install poppler). Any day the county
+file doesn't have yet, or every day if it can't be read, comes from the State
+Board's statewide absentee file instead, which is refreshed each morning with
+the previous day's early votes. Both files are downloaded to ncsbe_cache/ and
+only fetched again when there is a newer copy.
 
 Standard library only. Examples:
     python3 visualize_waits.py
@@ -36,6 +40,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -58,6 +64,14 @@ NCSBE_URL = "https://www.ncsbe.gov/results-data/absentee-and-provisional-data"
 ELECTION = "20261103"
 ABSENTEE_URL = "https://s3.amazonaws.com/dl.ncsbe.gov/ENRS/{d}/absentee_{ymd}.zip"
 COUNTY = "WAKE"
+COUNTY_TURNOUT_URL = (
+    "https://s3.us-west-1.amazonaws.com/wakegov.com.if-us-west-1/s3fs-public/"
+    "documents/2026-10/2026EVunofficial.pdf"
+)
+COUNTY_ELECTION_URL = (
+    "https://www.wake.gov/departments-government/board-elections/"
+    "election-information/2026-general-election"
+)
 # State Board site_name -> tracker site name, for any pair the word match gets wrong or misses.
 SITE_ALIASES = {}
 # Words too generic to identify a site.
@@ -140,12 +154,9 @@ def load_rows(path):
     return rows
 
 
-def fetch_absentee(election, cache_dir):
-    """Download the State Board absentee zip if it changed; return (path, last_modified) or (None, None)."""
-    url = ABSENTEE_URL.format(
-        d=f"{election[:4]}_{election[4:6]}_{election[6:]}", ymd=election
-    )
-    path = cache_dir / f"absentee_{election}.zip"
+def fetch(url, path):
+    """Download url to path if it changed; return (path, last_modified) or (None, None)."""
+    cache_dir = path.parent
     headers = {"User-Agent": "Mozilla/5.0"}
     if path.exists():
         headers["If-Modified-Since"] = formatdate(path.stat().st_mtime, usegmt=True)
@@ -172,6 +183,114 @@ def fetch_absentee(election, cache_dir):
     if not path.exists():
         return None, None
     return path, datetime.fromtimestamp(path.stat().st_mtime, UTC).astimezone(TZ)
+
+
+def fetch_absentee(election, cache_dir):
+    url = ABSENTEE_URL.format(
+        d=f"{election[:4]}_{election[4:6]}_{election[6:]}", ymd=election
+    )
+    return fetch(url, cache_dir / f"absentee_{election}.zip")
+
+
+def find_pdftotext():
+    # launchd's PATH leaves out Homebrew, so look there too.
+    return shutil.which("pdftotext") or next(
+        (
+            p
+            for p in ("/opt/homebrew/bin/pdftotext", "/usr/local/bin/pdftotext")
+            if os.path.exists(p)
+        ),
+        None,
+    )
+
+
+def load_county_turnout(pdf_path, year):
+    """Read early votes by (county site name, ISO date) from the county's turnout PDF.
+
+    The first page is a table with a row per day ("10/15  1,534  1,201 ... 21,736")
+    and one column per site, the site names stacked a word per line above it.
+    Each header word goes to the column whose numbers it sits over. Returns
+    (counts, refreshed), or (None, None) if the table can't be read.
+    """
+    exe = find_pdftotext()
+    if not exe:
+        print(
+            "turnout: pdftotext not found (brew install poppler); skipping county turnout",
+            file=sys.stderr,
+        )
+        return None, None
+    try:
+        text = subprocess.run(
+            [exe, "-layout", str(pdf_path), "-"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"turnout: could not read {pdf_path} ({e})", file=sys.stderr)
+        return None, None
+    # "Last Refresh" and its time sit on separate lines.
+    refreshed = re.search(r"(\d+/\d+/\d{4} \d+:\d+:\d+ [AP]M)", text)
+    refreshed = (
+        datetime.strptime(refreshed[1], "%m/%d/%Y %I:%M:%S %p").replace(tzinfo=TZ)
+        if refreshed
+        else None
+    )
+    counts, names = Counter(), None
+    for page in text.split("\f"):
+        lines = page.splitlines()
+        head = next(
+            (i for i, ln in enumerate(lines) if re.match(r"\s*Vote\b", ln)), None
+        )
+        data = [
+            i
+            for i, ln in enumerate(lines)
+            if re.match(r"\s*\d{1,2}/\d{1,2}\s+[\d,]", ln)
+        ]
+        if not data:
+            continue
+        # Column centers from the first day's numbers; the last column is the total.
+        cells = list(re.finditer(r"\S+", lines[data[0]]))[1:]
+        centers = [(m.start() + m.end()) / 2 for m in cells]
+        if head is not None:
+            cols = [[] for _ in centers]
+            for ln in lines[head : data[0]]:
+                for m in re.finditer(r"\S+", ln):
+                    c = (m.start() + m.end()) / 2
+                    if c < centers[0] - 8:
+                        continue  # the "Vote Date" label column
+                    cols[
+                        min(range(len(centers)), key=lambda k: abs(centers[k] - c))
+                    ].append(m[0])
+            names = [" ".join(ws) for ws in cols]
+        if not names or names[-1].lower() != "total" or len(names) != len(centers):
+            print(
+                f"turnout: county table in {pdf_path} has an unexpected layout",
+                file=sys.stderr,
+            )
+            return None, None
+        for i in data:
+            day, *nums = re.findall(r"\S+", lines[i])
+            nums = [int(n.replace(",", "")) for n in nums]
+            if len(nums) != len(names):
+                print(
+                    f"turnout: skipping county row '{lines[i].strip()}'",
+                    file=sys.stderr,
+                )
+                continue
+            m, d = map(int, day.split("/"))
+            for name, n in zip(names[:-1], nums):
+                counts[name, f"{year}-{m:02d}-{d:02d}"] += n
+            if sum(nums[:-1]) != nums[-1]:
+                print(
+                    f"turnout: county row {day} doesn't add up to its total",
+                    file=sys.stderr,
+                )
+    if not counts:
+        print(f"turnout: no daily rows found in {pdf_path}", file=sys.stderr)
+        return None, None
+    return counts, refreshed
 
 
 def load_turnout(zip_path):
@@ -237,31 +356,63 @@ def match_sites(board_names, tracker_cities):
     return out
 
 
-def build_turnout(rows, election, cache_dir):
-    path, modified = fetch_absentee(election, cache_dir)
-    if not path:
-        return None
-    counts = load_turnout(path)
-    tracker = {r["site"]: r["city"] for r in rows}
-    boards = sorted({b for b, _ in counts})
-    mapping = match_sites(boards, tracker)
-    for b in boards:
+def to_tracker(counts, tracker, source):
+    """Re-key {(source site name, day): n} by tracker site name, logging the matches."""
+    names = sorted({b for b, _ in counts})
+    mapping = match_sites(names, tracker)
+    for b in names:
         if b not in mapping:
             print(
-                f"turnout: no tracker site matches '{b}' (add it to SITE_ALIASES if it should)",
+                f"turnout: no tracker site matches {source} site '{b}' (add it to SITE_ALIASES if it should)",
                 file=sys.stderr,
             )
     for b, s in sorted(mapping.items()):
-        print(f"turnout: '{b}' -> '{s}'")
+        print(f"turnout: {source} '{b}' -> '{s}'")
     by = Counter()
     for (b, d), n in counts.items():
         by[mapping.get(b, b), d] += n
+    return by
+
+
+def build_turnout(rows, election, cache_dir):
+    """Early votes by tracker site and day: the county's file where it has the day,
+    the State Board's for any day it doesn't."""
+    tracker = {r["site"]: r["city"] for r in rows}
+    county, refreshed = None, None
+    path, _ = fetch(COUNTY_TURNOUT_URL, cache_dir / "wake_ev_unofficial.pdf")
+    if path:
+        counts, refreshed = load_county_turnout(path, int(election[:4]))
+        if counts:
+            county = to_tracker(counts, tracker, "county")
+    board, modified = None, None
+    path, modified = fetch_absentee(election, cache_dir)
+    if path:
+        board = to_tracker(load_turnout(path), tracker, "State Board")
+    if county is None and board is None:
+        return None
+
+    county_days = {d for _, d in county or ()}
+    by = Counter({k: n for k, n in (board or {}).items() if k[1] not in county_days})
+    by.update(county or {})
+    board_days = sorted({d for _, d in board or ()} - county_days)
+    # The two count slightly differently (ballots cast vs. accepted), so log, don't fail.
+    for d in sorted(county_days & {d for _, d in board or ()}):
+        c = sum(n for (_, x), n in county.items() if x == d)
+        b = sum(n for (_, x), n in board.items() if x == d)
+        print(f"turnout: {d} county {c:,} vs State Board {b:,} ({c - b:+,})")
     return {
         "rows": [
             {"site": s, "city": tracker.get(s), "d": d, "n": n}
             for (s, d), n in sorted(by.items())
         ],
-        "updated": modified.strftime("%a %b %-d %-I:%M %p"),
+        "county": county is not None,
+        "countyUpdated": refreshed.strftime("%a %b %-d %-I:%M %p")
+        if county and refreshed
+        else None,
+        "boardUpdated": modified.strftime("%a %b %-d %-I:%M %p")
+        if board is not None
+        else None,
+        "boardDays": board_days,
     }
 
 
@@ -292,7 +443,9 @@ def main():
         help="add a note to the report's Data notes (repeatable)",
     )
     p.add_argument(
-        "--no-turnout", action="store_true", help="skip State Board turnout data"
+        "--no-turnout",
+        action="store_true",
+        help="skip county and State Board turnout data",
     )
     p.add_argument(
         "--election",
@@ -321,7 +474,8 @@ def main():
         r
         for r in rows
         if r["t"][:10] not in hours
-        or hours[r["t"][:10]][0] <= int(r["t"][11:13]) * 60 + int(r["t"][14:16])
+        or hours[r["t"][:10]][0]
+        <= int(r["t"][11:13]) * 60 + int(r["t"][14:16])
         < hours[r["t"][:10]][1]
     ]
     if not rows:
@@ -347,7 +501,12 @@ def main():
         "turnout": turnout,
         "notes": args.note,
         "addresses": addresses,
-        "links": {"tracker": TRACKER_URL, "county": COUNTY_URL, "ncsbe": NCSBE_URL},
+        "links": {
+            "tracker": TRACKER_URL,
+            "county": COUNTY_URL,
+            "countyTurnout": COUNTY_ELECTION_URL,
+            "ncsbe": NCSBE_URL,
+        },
         "sources": [s.name for s in srcs],
         # Closing time per day, minutes after midnight, for "polls close at" in Right now.
         "closes": {
@@ -519,7 +678,7 @@ function svgSiteLabel(svg, x, y, site, label) {  // site name in an SVG chart, l
   const t = text(parent, x, y, label, { class: "lbl" });
   if (u) el("title", {}, t).textContent = `${DATA.addresses[site]} (directions)`;
 }
-// votes[site][day] from the State Board file; sites the tracker doesn't list keep their Board name.
+// votes[site][day] from the county or State Board file; sites the tracker doesn't list keep their file's name.
 const VOTES = {}, TURN_CITY = {};
 (TURN ? TURN.rows : []).forEach(r => { (VOTES[r.site] = VOTES[r.site] || {})[r.d] = r.n; TURN_CITY[r.site] = r.city; });
 const fmtN = n => n == null ? "—" : n.toLocaleString();
@@ -720,7 +879,7 @@ function renderAvg() {
   hit.addEventListener("mouseleave", () => { hideTip(); cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
 }
 
-// Early votes per day (State Board), following the Town filter; the chosen day is emphasized.
+// Early votes per day (county, else State Board), following the Town filter; the chosen day is emphasized.
 function renderTurnout() {
   const card = document.getElementById("turn-card");
   if (!TURN) { card.style.display = "none"; return; }
@@ -730,12 +889,17 @@ function renderTurnout() {
   const days = [...new Set(TURN.rows.map(r => r.d))].sort();
   const tot = days.map(d => ({ d, n: sites.reduce((a, s) => a + (VOTES[s][d] || 0), 0),
     top: sites.map(s => [s, VOTES[s][d] || 0]).filter(x => x[1]).sort((a, b) => b[1] - a[1]).slice(0, 3) }));
-  document.getElementById("turn-sub").innerHTML =
-    `${city || "All Wake County sites"}. Accepted in-person early votes from the ` +
-    `<a href="${LINKS.ncsbe}" target="_blank" rel="noopener">NC State Board of Elections</a>, ` +
-    `file updated ${TURN.updated}. The State Board posts each day's votes the next morning.`;
+  const board = `<a href="${LINKS.ncsbe}" target="_blank" rel="noopener">NC State Board of Elections</a>`;
+  const fromBoard = TURN.boardDays.length ? TURN.boardDays.map(fmtDay).join(", ") : "";
+  document.getElementById("turn-sub").innerHTML = `${city || "All Wake County sites"}. ` + (TURN.county
+    ? `Unofficial early votes from the <a href="${LINKS.countyTurnout}" target="_blank" rel="noopener">Wake County Board of Elections</a>` +
+      (TURN.countyUpdated ? `, refreshed ${TURN.countyUpdated}` : "") +
+      `. The county posts each day's votes that evening.` +
+      (fromBoard ? ` ${fromBoard} from the ${board} (accepted votes, file updated ${TURN.boardUpdated}).` : "")
+    : `Accepted in-person early votes from the ${board}, file updated ${TURN.boardUpdated}. ` +
+      `The State Board posts each day's votes the next morning.`);
   const kp = document.getElementById("turn-kpis");
-  if (!days.length) { kp.innerHTML = ""; host.innerHTML = `<p class="empty">No early votes reported yet. The first day's votes appear in the next morning's file.</p>`; return; }
+  if (!days.length) { kp.innerHTML = ""; host.innerHTML = `<p class="empty">No early votes reported yet. The first day's votes appear after polls close.</p>`; return; }
   const total = tot.reduce((a, x) => a + x.n, 0), best = tot.reduce((a, x) => x.n > a.n ? x : a);
   const selN = tot.find(x => x.d === sel);
   kp.innerHTML = [[fmtN(total), `early votes over ${days.length} day${days.length > 1 ? "s" : ""}`],

@@ -9,6 +9,8 @@ The Wake County Board of Elections publishes each site's current wait on a
 the current wait, with no history. These scripts poll the tracker every few
 minutes, save each reading to a CSV file, and turn that history into a report.
 The report also includes daily early-vote turnout from the
+[Wake County Board of Elections](https://www.wake.gov/departments-government/board-elections/election-information/2026-general-election),
+filling in from the
 [NC State Board of Elections](https://www.ncsbe.gov/results-data/absentee-and-provisional-data).
 
 This is an independent project and is not affiliated with the Wake County Board
@@ -30,8 +32,8 @@ The report includes:
 - **Through the day, by site:** a site-by-time heatmap with each site's early
   votes for the day.
 - **Average reported wait time:** the average across sites over the day.
-- **Early votes cast per day:** turnout from the State Board, posted the next
-  morning.
+- **Early votes cast per day:** turnout from the county, posted the same
+  evening.
 - **Typical wait by time of day, by town:** averaged over every day collected.
 - **Data notes:** each day's polling window and any gaps when the monitor wasn't
   running. For example, there were no polls on Thursday morning, Oct 15, from
@@ -43,13 +45,14 @@ The report includes:
 |---|---|
 | `wake_wait_monitor.py` | Polls the county tracker, prints a table, and appends each reading to a CSV |
 | `run_during_early_voting.py` | Keeps the monitor running only during early voting hours |
-| `visualize_waits.py` | Builds the HTML report from one or more CSVs, plus State Board turnout |
+| `visualize_waits.py` | Builds the HTML report from one or more CSVs, plus county and State Board turnout |
 | `publish_report.sh` | Rebuilds and pushes the report; run every 20 minutes by launchd |
 | `2026-10-15_to_2026_10-31.csv` | Every reading collected, starting Thu Oct 15 at 8:45 AM |
 | `docs/index.html`, `docs/report.png` | The latest report and a screenshot of it |
 | `RUNNING.md` | How to run everything |
 
-All scripts use only the Python 3.11+ standard library. See [RUNNING.md](RUNNING.md).
+All scripts use only the Python 3.11+ standard library. Reading the county's turnout
+PDF also needs `pdftotext` (`brew install poppler`). See [RUNNING.md](RUNNING.md).
 
 ## The data
 
@@ -69,13 +72,16 @@ Things to know when using the data:
   update every 10–90 minutes.
 - **Gaps in the data are gaps in polling,** not periods with no wait. The report
   lists them under Data notes.
-- **Turnout counts accepted in-person early votes per site per day.** They come
-  from the State Board's statewide absentee file, and only the per-site counts
-  are kept. That file lists individual voters, so it's downloaded to
-  `ncsbe_cache/` and never committed.
+- **Turnout counts in-person early votes per site per day.** They come from
+  the county's unofficial early voting turnout PDF, refreshed each evening. Any
+  day that file doesn't have comes from the State Board's statewide absentee
+  file, which counts accepted ballots and is posted the next morning, so the two
+  can differ slightly. Only the per-site counts are kept. The State Board file
+  lists individual voters, so both files are downloaded to `ncsbe_cache/` and
+  never committed.
 
 ## License
 
 [MIT](LICENSE) for the code. The wait-time data comes from the Wake County
-Board of Elections' public tracker, and turnout comes from the NC State Board of
-Elections' public files.
+Board of Elections' public tracker, and turnout comes from the Wake County and
+NC State Board of Elections' public files.
