@@ -35,9 +35,9 @@ The report includes:
 - **Early votes cast per day:** turnout from the county, posted the same
   evening.
 - **Typical wait by time of day, by town:** averaged over every day collected.
-- **Data notes:** each day's polling window and any gaps when the monitor wasn't
-  running. For example, there were no polls on Thursday morning, Oct 15, from
-  9:10 to 11:02 AM.
+
+The Day picker opens on an **average day**: each site's reading in every
+15-minute slot, averaged over every day collected. Pick a date to see that day.
 
 ## Files
 
@@ -70,8 +70,8 @@ Things to know when using the data:
 
 - **Waits are ranges and are only as current as the site's last update.** Sites
   update every 10–90 minutes.
-- **Gaps in the data are gaps in polling,** not periods with no wait. The report
-  lists them under Data notes.
+- **A reading stands until the site posts a new one,** so the report carries
+  each reading forward through stretches with no updates.
 - **Turnout counts in-person early votes per site per day.** They come from
   the county's unofficial early voting turnout PDF, refreshed each evening. Any
   day that file doesn't have comes from the State Board's statewide absentee

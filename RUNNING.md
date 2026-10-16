@@ -60,7 +60,6 @@ The monitor and the wrapper stop if the terminal closes; use `tmux`/`screen`,
 ```sh
 ./visualize_waits.py 2026-10-15_to_2026_10-31.csv --open   # -> waits_report.html
 ./visualize_waits.py a.csv b.csv -o report.html             # combine several CSVs
-./visualize_waits.py FILE.csv --note "Sites closed early Saturday for weather."
 ```
 
 | Option | Meaning |
@@ -68,7 +67,6 @@ The monitor and the wrapper stop if the terminal closes; use `tmux`/`screen`,
 | `CSV ...` | One or more monitor CSVs, combined (default `waits.csv`) |
 | `-o FILE` | Output HTML (default `waits_report.html` next to the first CSV) |
 | `--open` | Open the report in a browser |
-| `--note TEXT` | Add a line to the report's Data notes (repeatable). Gaps in polling are listed automatically. |
 | `--no-turnout` | Skip the county and State Board turnout data |
 | `--election YYYYMMDD` | Election to get turnout for (default `20261103`) |
 

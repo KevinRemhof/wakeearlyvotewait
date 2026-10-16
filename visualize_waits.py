@@ -10,8 +10,6 @@ The report is a single self-contained HTML file (no network needed to view it):
   * Average wait    - mean reported wait time across sites over the day
   * Turnout by day  - early votes cast per day (county and State Board data)
   * Typical by hour - town x half-hour heatmap averaged over every day collected
-  * Data notes      - each day's polling window and any gaps when the monitor wasn't
-                      running, plus notes given with --note
 
 Wait labels are shown exactly as the tracker reports them. For averages each
 range ("15-30 Minutes") counts as its midpoint and an open-ended label ("2+ Hours")
@@ -30,7 +28,7 @@ only fetched again when there is a newer copy.
 Standard library only. Examples:
     python3 visualize_waits.py
     python3 visualize_waits.py waits.csv -o report.html --open
-    python3 visualize_waits.py waits.csv more_waits.csv --note "Monitor started late Thursday."
+    python3 visualize_waits.py waits.csv more_waits.csv
     python3 visualize_waits.py --no-turnout
 """
 
@@ -62,6 +60,8 @@ TRACKER_URL = "https://airtable.com/appAL6KsUEvshj4br/shrQkIIFla4bjdGzh"
 COUNTY_URL = "https://wakevotesearly.com"
 NCSBE_URL = "https://www.ncsbe.gov/results-data/absentee-and-provisional-data"
 ELECTION = "20261103"
+# Earlier general election to compare daily turnout with, matched by day of early voting.
+PRIOR_ELECTION = "20221108"
 ABSENTEE_URL = "https://s3.amazonaws.com/dl.ncsbe.gov/ENRS/{d}/absentee_{ymd}.zip"
 COUNTY = "WAKE"
 COUNTY_TURNOUT_URL = (
@@ -304,7 +304,8 @@ def load_turnout(zip_path):
             ):
                 if (
                     r["county_desc"] == COUNTY
-                    and r["ballot_req_type"] == "EARLY VOTING"
+                    # "ONE-STOP" in older files, such as 2022's
+                    and r["ballot_req_type"] in ("EARLY VOTING", "ONE-STOP")
                     and r["ballot_rtn_status"].startswith("ACCEPTED")
                     and r["ballot_rtn_dt"].strip()
                 ):
@@ -314,6 +315,20 @@ def load_turnout(zip_path):
                         .isoformat()
                     )
                     counts[r["site_name"].strip(), d] += 1
+    return counts
+
+
+def load_prior_turnout(election, cache_dir):
+    """Early votes by (State Board site name, ISO date) for a past election. Its file no
+    longer changes, so the counts are cached next to it rather than re-read on every build."""
+    path, _ = fetch_absentee(election, cache_dir)
+    if not path:
+        return None
+    cache = cache_dir / f"turnout_{election}.json"
+    if cache.exists() and cache.stat().st_mtime >= path.stat().st_mtime:
+        return Counter({(s, d): n for s, d, n in json.loads(cache.read_text())})
+    counts = load_turnout(path)
+    cache.write_text(json.dumps(sorted([s, d, n] for (s, d), n in counts.items())))
     return counts
 
 
@@ -437,12 +452,6 @@ def main():
         "--open", action="store_true", help="open the report in a browser when done"
     )
     p.add_argument(
-        "--note",
-        action="append",
-        default=[],
-        help="add a note to the report's Data notes (repeatable)",
-    )
-    p.add_argument(
         "--no-turnout",
         action="store_true",
         help="skip county and State Board turnout data",
@@ -491,6 +500,18 @@ def main():
         if args.no_turnout
         else build_turnout(rows, args.election, here / "ncsbe_cache")
     )
+    if turnout:
+        prior = load_prior_turnout(PRIOR_ELECTION, here / "ncsbe_cache")
+        if prior:
+            daily = Counter()
+            for (_, d), n in prior.items():
+                daily[d] += n
+            # Day N of this election's early voting lines up with day N of the earlier one.
+            turnout["prior"] = {
+                "year": int(PRIOR_ELECTION[:4]),
+                "days": [{"d": d, "n": n} for d, n in sorted(daily.items())],
+            }
+            turnout["evDays"] = [d.isoformat() for d in sorted(FALLBACK_SCHEDULE)]
     addresses = {}
     for r in rows:  # keep one address per site rather than repeating it on every row
         addresses[r["site"]] = r.pop("addr") or addresses.get(r["site"], "")
@@ -499,7 +520,6 @@ def main():
         "rows": rows,
         "bands": BANDS,
         "turnout": turnout,
-        "notes": args.note,
         "addresses": addresses,
         "links": {
             "tracker": TRACKER_URL,
@@ -509,6 +529,12 @@ def main():
         },
         "sources": [s.name for s in srcs],
         # Closing time per day, minutes after midnight, for "polls close at" in Right now.
+        # Opening time per day, for counting each site's first report back to opening.
+        "opens": {
+            d.isoformat(): h * 60 + m
+            for d, (open_, _) in FALLBACK_SCHEDULE.items()
+            for h, m in [parse_clock(open_)]
+        },
         "closes": {
             d.isoformat(): h * 60 + m
             for d, (_, close) in FALLBACK_SCHEDULE.items()
@@ -541,8 +567,8 @@ TEMPLATE = r"""<!doctype html>
   --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
   --none: #ecebe6;
-  --b0: #86b6ef; --b1: #5598e7; --b2: #2a78d6; --b3: #1c5cab; --b4: #0d366b;
-  --line: #2a78d6; --line-soft: #b7d3f6;
+  --b0: #75c6a1; --b1: #22af7d; --b2: #078f64; --b3: #066f4d; --b4: #00432c;
+  --line: #199e70; --line-soft: #afddc6; --turn: #199e70; --turn-soft: #afddc6; --prior: #4a3aa7;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -551,8 +577,8 @@ TEMPLATE = r"""<!doctype html>
     --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
     --none: #262624;
-    --b0: #184f95; --b1: #2a78d6; --b2: #5598e7; --b3: #86b6ef; --b4: #cde2fb;
-    --line: #3987e5; --line-soft: #184f95;
+    --b0: #036042; --b1: #078f64; --b2: #22af7d; --b3: #75c6a1; --b4: #c8e9d8;
+    --line: #199e70; --line-soft: #036042; --turn: #199e70; --turn-soft: #036042; --prior: #9085e9;
   }
 }
 :root[data-theme="dark"] {
@@ -561,8 +587,8 @@ TEMPLATE = r"""<!doctype html>
   --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
   --none: #262624;
-  --b0: #184f95; --b1: #2a78d6; --b2: #5598e7; --b3: #86b6ef; --b4: #cde2fb;
-  --line: #3987e5; --line-soft: #184f95;
+  --b0: #036042; --b1: #078f64; --b2: #22af7d; --b3: #75c6a1; --b4: #c8e9d8;
+  --line: #199e70; --line-soft: #036042; --turn: #199e70; --turn-soft: #036042; --prior: #9085e9;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink);
@@ -578,7 +604,12 @@ h2 { font-size: 16px; margin: 0 0 2px; }
 .filters label { color: var(--ink-2); font-size: 13px; display: flex; gap: 6px; align-items: center; }
 select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
   border-radius: 6px; padding: 4px 8px; }
+.foot { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 8px 0 4px; }
+.legend.pick button { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 2px 0; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; }
+.legend.pick button:hover { color: var(--ink); }
+.legend.pick button.on { color: var(--ink); font-weight: 600; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .scroll { overflow-x: auto; }
@@ -609,8 +640,6 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
 #tip b { display: block; margin-bottom: 2px; }
 #tip .m { color: var(--ink-2); }
 .empty { color: var(--muted); padding: 16px 0; }
-.notes ul { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
-.notes li { margin: 4px 0; }
 </style>
 </head>
 <body>
@@ -633,7 +662,7 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
 
   <section class="card" aria-labelledby="h-heat">
     <h2 id="h-heat">Through the day, by site</h2>
-    <p class="sub">Each cell is one poll of the county's tracker. Sites are grouped by town; hover a cell for details.</p>
+    <p class="sub" id="heat-sub"></p>
     <div class="legend" id="legend"></div>
     <div class="scroll" id="heat"></div>
   </section>
@@ -642,6 +671,7 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
     <h2 id="h-avg">Average reported wait time</h2>
     <p class="sub" id="avg-sub"></p>
     <div class="kpis" id="kpis"></div>
+    <div class="legend pick" id="avg-legend"></div>
     <div id="avg"></div>
   </section>
 
@@ -649,6 +679,7 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
     <h2 id="h-turn">Early votes cast per day</h2>
     <p class="sub" id="turn-sub"></p>
     <div class="kpis" id="turn-kpis"></div>
+    <div class="legend" id="turn-legend"></div>
     <div id="turn"></div>
   </section>
 
@@ -656,11 +687,7 @@ svg a:hover text { fill: var(--line); text-decoration: underline; }
     <h2 id="h-tod">Typical reported wait time by time of day, by town</h2>
     <p class="sub" id="tod-sub"></p>
     <div class="scroll" id="tod"></div>
-  </section>
-
-  <section class="card notes" aria-labelledby="h-notes">
-    <h2 id="h-notes">Data notes</h2>
-    <ul id="notes"></ul>
+    <p class="foot">Sites post when their wait changes, so a reading stands from the time it was posted until the next post, and a site's first post of the day covers the time back to opening.</p>
   </section>
 </main>
 <div id="tip" role="tooltip"></div>
@@ -691,11 +718,10 @@ const clock = m => { const h = Math.floor(m / 60), mm = m % 60, h12 = (h + 11) %
   return `${h12}${mm ? ":" + String(mm).padStart(2, "0") : ""} ${h < 12 ? "AM" : "PM"}`; };
 const fmtMin = m => m == null ? "—" : `${Math.round(m)} min`;
 const fmtDay = d => new Date(d + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-// Typical spacing between polls; a longer gap means the monitor wasn't running.
+// Typical spacing between polls, used as the width of each day's last poll.
 const POLL_GAP = (() => { const ts = [...new Set(ROWS.map(r => r.t))].sort(), d = [];
   for (let i = 1; i < ts.length; i++) if (ts[i].slice(0, 10) === ts[i - 1].slice(0, 10)) d.push(mins(ts[i]) - mins(ts[i - 1]));
   d.sort((a, b) => a - b); return d.length ? d[d.length >> 1] || 5 : 5; })();
-const isGap = (a, b) => b - a > POLL_GAP * 3;
 const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
 const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag);
   for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
@@ -708,6 +734,50 @@ const cityCount = {};
 Object.values(siteCity).forEach(c => cityCount[c] = (cityCount[c] || 0) + 1);
 const CITIES = Object.keys(cityCount).sort((a, b) => cityCount[b] - cityCount[a] || a.localeCompare(b));
 const DAYS = [...new Set(ROWS.map(r => day(r.t)))].sort();
+const SLOT = 15;
+// Averaged days for the Day picker: every day, and weekdays, Saturdays and Sundays separately, since
+// their hours and crowds differ. Only kinds with data are offered.
+const dow = d => new Date(d + "T12:00").getDay();
+const AVG_KINDS = {
+  avg: { label: "Average day", noun: "day", has: d => true },
+  "avg-wk": { label: "Average weekday", noun: "weekday", has: d => dow(d) % 6 !== 0 },
+  "avg-sat": { label: "Average Saturday", noun: "Saturday", has: d => dow(d) === 6 },
+  "avg-sun": { label: "Average Sunday", noun: "Sunday", has: d => dow(d) === 0 },
+};
+const isAvg = d => d in AVG_KINDS;
+const kindDays = k => DAYS.filter(AVG_KINDS[k].has);
+const dayLabel = d => { if (!isAvg(d)) return fmtDay(d); const n = kindDays(d).length, k = AVG_KINDS[d];
+  return `an average ${k.noun} (${n} day${n > 1 ? "s" : ""})`; };
+// Each site's reading in every slot of every day, timed by when the site reported it (not when it was
+// polled) and standing until its next report: per[site][slot] = [minutes, one per day].
+// A reading carried over from an earlier day counts from the day's first poll. Before a site's first
+// wait time of the day, it counts that first one back to opening rather than leaving the slots empty.
+function slotReadings(size, days = DAYS) {
+  const polls = {}, per = {}, want = new Set(days);
+  ROWS.forEach(r => { const d = day(r.t); if (want.has(d)) ((polls[d] = polls[d] || {})[r.site] = polls[d][r.site] || []).push(r); });
+  let s0 = Infinity, s1 = -Infinity;
+  for (const d in polls) for (const site in polls[d]) {
+    let rs = polls[d][site].map(r => ({ r, m: r.u && day(r.u) === d ? Math.min(mins(r.u), mins(r.t)) : mins(r.t) }))
+      .sort((a, b) => a.m - b.m || (a.r.t < b.r.t ? -1 : 1));
+    const first = rs.findIndex(x => x.r.min != null);
+    if (first < 0) continue;
+    // Nothing counts before opening: a post made earlier stands from opening, as does the first post.
+    const open = (DATA.opens || {})[d];
+    rs = rs.slice(first).map(x => open == null ? x : { ...x, m: Math.max(x.m, open) });
+    if (open != null) rs[0] = { ...rs[0], m: Math.min(rs[0].m, open) };
+    const end = Math.max(...rs.map(x => mins(x.r.t)));
+    for (let m = Math.floor(rs[0].m / size) * size, i = 0; m <= end; m += size) {
+      while (i + 1 < rs.length && rs[i + 1].m < m + size) i++;
+      if (rs[i].m >= m + size || rs[i].r.min == null) continue;
+      ((per[site] = per[site] || {})[m] = per[site][m] || []).push(rs[i].r.min);
+      s0 = Math.min(s0, m); s1 = Math.max(s1, m);
+    }
+  }
+  return { per, s0, s1 };
+}
+const AVGS = {}; for (const k in AVG_KINDS) if (kindDays(k).length) AVGS[k] = slotReadings(SLOT, kindDays(k));
+const avgVotes = (s, k) => { const v = Object.entries(VOTES[s] || {}).filter(([d]) => AVG_KINDS[k].has(d)).map(([, n]) => n);
+  return v.length ? Math.round(mean(v)) : null; };
 
 // Tooltip
 const tip = document.getElementById("tip");
@@ -756,12 +826,15 @@ document.getElementById("links").innerHTML =
 
 // Filters
 const fDay = document.getElementById("f-day"), fCity = document.getElementById("f-city");
-fDay.innerHTML = DAYS.map(d => `<option value="${d}">${fmtDay(d)}</option>`).reverse().join("");
+fDay.innerHTML = Object.keys(AVGS).map(k => `<option value="${k}">${AVG_KINDS[k].label}</option>`).join("") +
+  DAYS.map(d => `<option value="${d}">${fmtDay(d)}</option>`).reverse().join("");
 fCity.innerHTML = `<option value="">All towns</option>` + CITIES.map(c => `<option>${c}</option>`).join("");
-try { const s = JSON.parse(localStorage.getItem("wait-filters") || "{}");
-  if (DAYS.includes(s.day)) fDay.value = s.day; if (CITIES.includes(s.city)) fCity.value = s.city; } catch (e) {}
+// The town is remembered; the day opens on the average day and only survives this tab's auto-reloads.
+try { const s = JSON.parse(localStorage.getItem("wait-filters") || "{}"), d = sessionStorage.getItem("wait-day");
+  if (DAYS.includes(d) || d in AVGS) fDay.value = d; if (CITIES.includes(s.city)) fCity.value = s.city; } catch (e) {}
 function onFilter() {
-  try { localStorage.setItem("wait-filters", JSON.stringify({ day: fDay.value, city: fCity.value })); } catch (e) {}
+  try { localStorage.setItem("wait-filters", JSON.stringify({ city: fCity.value }));
+    sessionStorage.setItem("wait-day", fDay.value); } catch (e) {}
   renderHeat(); renderAvg(); renderTurnout();
 }
 fDay.onchange = fCity.onchange = onFilter;
@@ -775,13 +848,23 @@ function timeAxis(svg, x0, width, t0, t1, y, gridTop, gridBottom) {
   }
 }
 
-// Through the day: rows = sites grouped by town, columns = polls on the chosen day.
+// Through the day: rows = sites grouped by town, columns = polls on the chosen day (each holding
+// until the next, since a reading stands until the site posts a new one) or 15-minute slots of the
+// averaged day.
 function renderHeat() {
   const host = document.getElementById("heat"); host.innerHTML = "";
-  const d = fDay.value, city = fCity.value;
-  const rows = ROWS.filter(r => day(r.t) === d && (!city || r.city === city));
+  const d = fDay.value, city = fCity.value, avg = isAvg(d), AVG = AVGS[d];
+  document.getElementById("heat-sub").textContent = (avg
+    ? `Each cell is a site's average reading in that 15 minutes across ${dayLabel(d).replace(/^an average \w+ \((.*)\)$/, "$1")}. ` +
+      "Sites post when their wait changes, so a reading stands until the next post, and a site's first post of the day covers the time back to opening."
+    : "Each cell is one poll of the county's tracker, holding until the next.") +
+    " Sites are grouped by town; hover a cell for details.";
+  const rows = ROWS.filter(r => (avg ? AVG_KINDS[d].has(day(r.t)) : day(r.t) === d) && (!city || r.city === city));
   if (!rows.length) { host.innerHTML = `<p class="empty">No polls for this selection.</p>`; return; }
-  const times = [...new Set(rows.map(r => r.t))].sort();
+  const cols = [];
+  if (avg) for (let m = AVG.s0; m <= AVG.s1; m += SLOT) cols.push({ m0: m, m1: m + SLOT });
+  else { const times = [...new Set(rows.map(r => r.t))].sort();
+    times.forEach((t, i) => cols.push({ t, m0: mins(t), m1: i + 1 < times.length ? mins(times[i + 1]) : mins(t) + POLL_GAP })); }
   const cell = {}; rows.forEach(r => cell[r.site + "|" + r.t] = r);
   const lines = [];
   (city ? [city] : CITIES).forEach(c => {
@@ -792,30 +875,34 @@ function renderHeat() {
   });
   const labelW = Math.min(300, Math.max(180, host.clientWidth * 0.32)), rowH = 18, cityH = 24, top = 4;
   const votesW = TURN ? 64 : 0;
-  const plotW = Math.max(host.clientWidth - labelW - votesW - 8, times.length * 4);
-  const t0 = mins(times[0]), t1 = mins(times[times.length - 1]);
-  const span = Math.max(t1 - t0, 1);
-  // Each poll covers until the next one, unless the monitor missed polls; then just one interval.
-  const gap = POLL_GAP;
-  const x = m => labelW + (m - t0) / (span + gap) * plotW;
+  const plotW = Math.max(host.clientWidth - labelW - votesW - 8, cols.length * 4);
+  const t0 = cols[0].m0, tLast = cols[cols.length - 1].m0, t1 = cols[cols.length - 1].m1;
+  const x = m => labelW + (m - t0) / (t1 - t0) * plotW;
   let y = top; lines.forEach(l => { l.y = y; y += l.city ? cityH : rowH; });
   const H = y + 22;
   const svg = el("svg", { width: labelW + plotW + votesW + 8, height: H, role: "img",
-    "aria-label": `Reported wait times by site on ${fmtDay(d)}` }, host);
+    "aria-label": `Reported wait times by site on ${dayLabel(d)}` }, host);
   const vx = labelW + plotW + votesW;
   lines.forEach((l, i) => {
     if (l.city) {
       text(svg, 0, l.y + cityH - 7, l.city, { class: "city" });
-      if (TURN && i === 0) text(svg, vx, l.y + cityH - 7, "Early votes", { "text-anchor": "end" });
+      if (TURN && i === 0) text(svg, vx, l.y + cityH - 7, avg ? "Votes/day" : "Early votes", { "text-anchor": "end" });
       return;
     }
-    if (TURN) text(svg, vx, l.y + rowH / 2 + 4, fmtN((VOTES[l.site] || {})[d]), { class: "num", "text-anchor": "end" });
+    if (TURN) text(svg, vx, l.y + rowH / 2 + 4, fmtN(avg ? avgVotes(l.site, d) : (VOTES[l.site] || {})[d]), { class: "num", "text-anchor": "end" });
     const name = l.site.length > 38 ? l.site.slice(0, 36) + "…" : l.site;
     svgSiteLabel(svg, 12, l.y + rowH / 2 + 4, l.site, name);
-    times.forEach((t, i) => {
+    cols.forEach(({ t, m0, m1 }) => {
+      const xa = x(m0), xb = x(m1);
+      if (avg) {
+        const vals = (AVG.per[l.site] || {})[m0], v = vals ? mean(vals) : null;
+        const rect = el("rect", { x: xa, y: l.y + 1, width: Math.max(xb - xa - 1, 1), height: rowH - 2,
+          rx: 2, fill: bandVar(bandOf(v)) }, svg);
+        hover(rect, () => `<b>${l.site}</b><span class="m">${clock(m0)}–${clock(m1)}, ${AVG_KINDS[d].label.toLowerCase()}</span><br>` +
+          (vals ? `Average ${fmtMin(v)}<br><span class="m">over ${vals.length} day${vals.length > 1 ? "s" : ""}</span>` : "No data"));
+        return;
+      }
       const r = cell[l.site + "|" + t];
-      const m0 = mins(t), m1 = i + 1 < times.length ? mins(times[i + 1]) : null;
-      const xa = x(m0), xb = m1 != null && !isGap(m0, m1) ? x(m1) : x(m0 + gap);
       const rect = el("rect", { x: xa, y: l.y + 1, width: Math.max(xb - xa - 1, 1), height: rowH - 2,
         rx: 2, fill: bandVar(r ? r.band : null) }, svg);
       hover(rect, () => `<b>${l.site}</b><span class="m">${fmtDay(d)} ${clock(mins(t))}</span><br>` +
@@ -823,58 +910,93 @@ function renderHeat() {
     });
   });
   const axisY = y + 14;
-  timeAxis(svg, labelW, plotW * span / (span + gap), t0, t1, axisY);
+  timeAxis(svg, labelW, x(tLast) - labelW, t0, tLast, axisY);
 }
 
-// Average reported wait time across sites (midpoint of each range), per poll.
+// Average reported wait time across sites (midpoint of each range) in 15-minute slots. Every day
+// and every average is drawn: the Day picker's choice bold in teal, the other averages as gray dashed
+// lines, the other days faint. The legend selects a series.
+const DAY_SLOTS = {}; DAYS.forEach(d => DAY_SLOTS[d] = slotReadings(SLOT, [d]));
+const DASH = { avg: "", "avg-wk": "6 4", "avg-sat": "2 3", "avg-sun": "9 3 2 3" };
+function seriesPts(key, city) {  // [{m, v, n, long}] for a day or an average kind
+  const S = isAvg(key) ? AVGS[key] : DAY_SLOTS[key], pts = [];
+  if (!S) return pts;
+  const sites = Object.keys(siteCity).filter(s => !city || siteCity[s] === city);
+  for (let m = S.s0; m <= S.s1; m += SLOT) {
+    const vs = sites.map(s => (S.per[s] || {})[m]).filter(Boolean).map(mean);
+    if (vs.length) pts.push({ m, v: mean(vs), n: vs.length, long: vs.filter(v => v >= 30).length });
+  }
+  return pts;
+}
+const seriesName = k => isAvg(k) ? AVG_KINDS[k].label : fmtDay(k);
 function renderAvg() {
   const host = document.getElementById("avg"); host.innerHTML = "";
-  const d = fDay.value, city = fCity.value;
-  const rows = ROWS.filter(r => day(r.t) === d && (!city || r.city === city) && r.min != null);
-  document.getElementById("avg-sub").textContent =
-    `${city || "All towns"}, ${fmtDay(d)}. Each reported range counts as its midpoint (15–30 min → 22.5 min); an open-ended wait like "60+" counts as its lower bound.`;
-  const kp = document.getElementById("kpis");
-  if (!rows.length) { kp.innerHTML = ""; host.innerHTML = `<p class="empty">No polls for this selection.</p>`; return; }
-  const byT = {}; rows.forEach(r => (byT[r.t] = byT[r.t] || []).push(r));
-  const pts = Object.keys(byT).sort().map(t => ({ t, m: mins(t), v: mean(byT[t].map(r => r.min)), n: byT[t].length,
-    long: byT[t].filter(r => r.min >= 30).length }));
+  const d = fDay.value, city = fCity.value, avg = isAvg(d);
+  const rows = ROWS.filter(r => (avg ? AVG_KINDS[d].has(day(r.t)) : day(r.t) === d) && (!city || r.city === city) && r.min != null);
+  document.getElementById("avg-sub").textContent = `${city || "All towns"}. Bold: ${dayLabel(d)}; dashed: the averages; faint: each other day. ` +
+    "Each site's standing reading in every 15-minute slot is averaged across sites (and across days for an average). " +
+    `Each reported range counts as its midpoint (15–30 min → 22.5 min); an open-ended wait like "60+" counts as its lower bound.`;
+  const kp = document.getElementById("kpis"), lg = document.getElementById("avg-legend");
+  const keys = [...Object.keys(AVGS), ...DAYS];
+  const all = {}; keys.forEach(k => all[k] = seriesPts(k, city));
+  const pts = all[d] || [];
+  if (!rows.length || !pts.length) { kp.innerHTML = lg.innerHTML = ""; host.innerHTML = `<p class="empty">No polls for this selection.</p>`; return; }
   const peak = pts.reduce((a, p) => p.v > a.v ? p : a);
   const worst = rows.reduce((a, r) => r.min > a.min ? r : a);
   kp.innerHTML = [
     [fmtMin(mean(pts.map(p => p.v))), "average over the day"],
-    [`${fmtMin(peak.v)} at ${clock(peak.m)}`, "busiest poll"],
-    [worst.wait.replace(/ Minutes?/i, " min"), `longest reported wait (${worst.site}, ${clock(mins(worst.t))})`],
+    [`${fmtMin(peak.v)} at ${clock(peak.m)}`, avg ? "busiest time of day" : "busiest time"],
+    [worst.wait.replace(/ Minutes?/i, " min"), `longest reported wait (${worst.site}, ${avg ? fmtDay(day(worst.t)) + " " : ""}${clock(mins(worst.t))})`],
   ].map(([v, k]) => `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 
-  const W = Math.max(host.clientWidth, 320), H = 200, L = 40, R = 12, T = 10, B = 24;
-  const t0 = pts[0].m, t1 = pts[pts.length - 1].m, span = Math.max(t1 - t0, 1);
-  const vmax = Math.max(15, Math.ceil(Math.max(...pts.map(p => p.v)) / 15) * 15);
+  // Legend: every series, clickable. A short line sample shows each one's style.
+  const sample = (k, sel) => `<svg width="22" height="10" aria-hidden="true"><line x1="1" x2="21" y1="5" y2="5" ` +
+    `stroke="${sel ? "var(--line)" : isAvg(k) ? "var(--ink-2)" : "var(--line)"}" stroke-width="${sel ? 3 : isAvg(k) ? 2 : 1.5}" ` +
+    `${!sel && isAvg(k) && DASH[k] ? `stroke-dasharray="${DASH[k]}"` : ""} ${!sel && !isAvg(k) ? 'opacity="0.35"' : ""}/></svg>`;
+  lg.innerHTML = keys.filter(k => all[k].length).map(k =>
+    `<button type="button" data-k="${k}" class="${k === d ? "on" : ""}" aria-pressed="${k === d}">${sample(k, k === d)}${seriesName(k)}</button>`).join("");
+  lg.querySelectorAll("button").forEach(b => b.onclick = () => { fDay.value = b.dataset.k; onFilter(); });
+
+  const W = Math.max(host.clientWidth, 320), H = 220, L = 40, R = 12, T = 10, B = 24;
+  const ms = keys.flatMap(k => all[k].map(p => p.m));
+  const t0 = Math.min(...ms), t1 = Math.max(...ms), span = Math.max(t1 - t0, 1);
+  const vmax = Math.max(15, Math.ceil(Math.max(...keys.flatMap(k => all[k].map(p => p.v))) / 15) * 15);
   const X = m => L + (m - t0) / span * (W - L - R), Y = v => T + (1 - v / vmax) * (H - T - B);
-  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Average reported wait time over the day" }, host);
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": `Average reported wait time over the day, ${seriesName(d)} highlighted` }, host);
   for (let v = 0; v <= vmax; v += 15) {
     el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v ? "var(--grid)" : "var(--axis)" }, svg);
     text(svg, L - 6, Y(v) + 4, v + "m", { "text-anchor": "end" });
   }
   timeAxis(svg, L, W - L - R, t0, t1, H - 6);
-  // Break the line where the monitor missed polls rather than drawing across the gap.
-  const runs = [[]];
-  pts.forEach((p, i) => { if (i && isGap(pts[i - 1].m, p.m)) runs.push([]); runs[runs.length - 1].push(p); });
-  runs.forEach(run => {
-    const path = run.map((p, i) => `${i ? "L" : "M"}${X(p.m).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
-    if (run.length > 1) el("path", { d: path + `L${X(run[run.length - 1].m)},${Y(0)}L${X(run[0].m)},${Y(0)}Z`,
-      fill: "var(--line)", opacity: 0.12 }, svg);
-    else el("circle", { cx: X(run[0].m), cy: Y(run[0].v), r: 2, fill: "var(--line)" }, svg);
-    el("path", { d: path, fill: "none", stroke: "var(--line)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
-  });
+  const pathOf = ps => ps.map((p, i) => `${i ? "L" : "M"}${X(p.m).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  // Context first (faint days, then dashed averages), the selection on top.
+  DAYS.filter(k => k !== d && all[k].length).forEach(k =>
+    el("path", { d: pathOf(all[k]), fill: "none", stroke: "var(--line)", "stroke-width": 1.5, opacity: 0.3, "stroke-linejoin": "round" }, svg));
+  Object.keys(AVGS).filter(k => k !== d && all[k].length).forEach(k =>
+    el("path", { d: pathOf(all[k]), fill: "none", stroke: "var(--ink-2)", "stroke-width": 1.5, "stroke-dasharray": DASH[k],
+      opacity: 0.8, "stroke-linejoin": "round" }, svg));
+  const path = pathOf(pts);
+  if (pts.length > 1) el("path", { d: path + `L${X(pts[pts.length - 1].m)},${Y(0)}L${X(pts[0].m)},${Y(0)}Z`,
+    fill: "var(--line)", opacity: 0.12 }, svg);
+  el("path", { d: path, fill: "none", stroke: "var(--line)", "stroke-width": 3, "stroke-linejoin": "round" }, svg);
+
   const cross = el("line", { y1: T, y2: H - B, stroke: "var(--axis)", visibility: "hidden" }, svg);
   const dot = el("circle", { r: 4, fill: "var(--line)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg);
   const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
   hit.addEventListener("mousemove", e => {
-    const bx = svg.getBoundingClientRect(), mx = e.clientX - bx.left;
-    const p = pts.reduce((a, q) => Math.abs(X(q.m) - mx) < Math.abs(X(a.m) - mx) ? q : a);
-    cross.setAttribute("x1", X(p.m)); cross.setAttribute("x2", X(p.m)); cross.setAttribute("visibility", "visible");
-    dot.setAttribute("cx", X(p.m)); dot.setAttribute("cy", Y(p.v)); dot.setAttribute("visibility", "visible");
-    showTip(e, `<b>${clock(p.m)}</b>Average ${fmtMin(p.v)}<br><span class="m">${p.n} sites reporting · ${p.long} at 30+ min</span>`);
+    const bx = svg.getBoundingClientRect(), m = t0 + Math.round((e.clientX - bx.left - L) / (W - L - R) * span / SLOT) * SLOT;
+    const at = k => all[k].find(p => p.m === m), p = at(d);
+    cross.setAttribute("x1", X(m)); cross.setAttribute("x2", X(m)); cross.setAttribute("visibility", "visible");
+    if (p) { dot.setAttribute("cx", X(m)); dot.setAttribute("cy", Y(p.v)); dot.setAttribute("visibility", "visible"); }
+    else dot.setAttribute("visibility", "hidden");
+    const others = Object.keys(AVGS).filter(k => k !== d && at(k)).map(k => `${seriesName(k)}: ${fmtMin(at(k).v)}`);
+    const days = DAYS.filter(k => k !== d && at(k)).map(k => [k, at(k).v]);
+    const dayTxt = days.length <= 7 ? days.map(([k, v]) => `${fmtDay(k)}: ${fmtMin(v)}`)
+      : [`Other days: ${fmtMin(Math.min(...days.map(x => x[1])))}–${fmtMin(Math.max(...days.map(x => x[1])))}`];
+    showTip(e, `<b>${clock(m)}–${clock(m + SLOT)}</b>` +
+      (p ? `${seriesName(d)}: ${fmtMin(p.v)}<br><span class="m">${p.n} sites reporting · ${p.long} ${avg ? "averaging" : "at"} 30+ min</span>`
+        : `${seriesName(d)}: no data`) +
+      ([...others, ...dayTxt].length ? `<br><span class="m">${[...others, ...dayTxt].join("<br>")}</span>` : ""));
   });
   hit.addEventListener("mouseleave", () => { hideTip(); cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
 }
@@ -886,7 +1008,13 @@ function renderTurnout() {
   const host = document.getElementById("turn"); host.innerHTML = "";
   const city = fCity.value, sel = fDay.value;
   const sites = Object.keys(VOTES).filter(s => !city || TURN_CITY[s] === city);
-  const days = [...new Set(TURN.rows.map(r => r.d))].sort();
+  const posted = new Set(TURN.rows.map(r => r.d));
+  // Days with wait data but no votes yet still get a slot, marked as not posted yet. With an
+  // earlier election to compare, every early voting day gets one.
+  const PRIOR = TURN.prior, EV = TURN.evDays || [], showPrior = !!PRIOR && !city;
+  const days = [...new Set([...posted, ...DAYS, ...(showPrior ? EV : [])])].sort();
+  const waiting = DAYS.filter(d => !posted.has(d));  // tracked days the county hasn't posted votes for
+  const priorOf = d => { const i = EV.indexOf(d); return PRIOR && i >= 0 ? PRIOR.days[i] : null; };
   const tot = days.map(d => ({ d, n: sites.reduce((a, s) => a + (VOTES[s][d] || 0), 0),
     top: sites.map(s => [s, VOTES[s][d] || 0]).filter(x => x[1]).sort((a, b) => b[1] - a[1]).slice(0, 3) }));
   const board = `<a href="${LINKS.ncsbe}" target="_blank" rel="noopener">NC State Board of Elections</a>`;
@@ -897,21 +1025,42 @@ function renderTurnout() {
       `. The county posts each day's votes that evening.` +
       (fromBoard ? ` ${fromBoard} from the ${board} (accepted votes, file updated ${TURN.boardUpdated}).` : "")
     : `Accepted in-person early votes from the ${board}, file updated ${TURN.boardUpdated}. ` +
-      `The State Board posts each day's votes the next morning.`);
+      `The State Board posts each day's votes the next morning.`) +
+    (PRIOR ? (showPrior ? ` Purple bars are the ${PRIOR.year} general election, matched by day of early voting (both began on a Thursday).` +
+        (waiting.length ? ` ${waiting.map(fmtDay).join(", ")} ${EV[0].slice(0, 4)} count${waiting.length > 1 ? "s" : ""} not posted yet.` : "")
+      : ` The ${PRIOR.year} comparison is for all towns only.`) : "");
+  document.getElementById("turn-legend").innerHTML = showPrior
+    ? `<span><i class="sw" style="background:var(--turn)"></i>${EV[0].slice(0, 4)}</span>` +
+      `<span><i class="sw" style="background:var(--prior)"></i>${PRIOR.year}</span>` : "";
   const kp = document.getElementById("turn-kpis");
-  if (!days.length) { kp.innerHTML = ""; host.innerHTML = `<p class="empty">No early votes reported yet. The first day's votes appear after polls close.</p>`; return; }
+  if (!posted.size) { kp.innerHTML = ""; host.innerHTML = `<p class="empty">No early votes reported yet. The first day's votes appear after polls close.</p>`; return; }
+  tot.forEach(x => x.pending = !posted.has(x.d));
   const total = tot.reduce((a, x) => a + x.n, 0), best = tot.reduce((a, x) => x.n > a.n ? x : a);
-  const selN = tot.find(x => x.d === sel);
-  kp.innerHTML = [[fmtN(total), `early votes over ${days.length} day${days.length > 1 ? "s" : ""}`],
+  const selN = tot.find(x => x.d === sel && !x.pending);
+  const avgKpi = k => { const ns = tot.filter(x => !x.pending && AVG_KINDS[k].has(x.d)).map(x => x.n);
+    return ns.length ? [fmtN(Math.round(mean(ns))), `average per ${AVG_KINDS[k].noun}`] : null; };
+  // Running total so far against the same early voting days last time.
+  const done = tot.filter(x => !x.pending && priorOf(x.d)), was = done.reduce((a, x) => a + priorOf(x.d).n, 0);
+  const pct = (a, b) => `${a >= b ? "+" : "−"}${Math.abs(Math.round((a / b - 1) * 100))}%`;
+  const vsPrior = showPrior && was ? [pct(done.reduce((a, x) => a + x.n, 0), was),
+    `vs ${PRIOR.year} through day ${EV.indexOf(done[done.length - 1].d) + 1} (${fmtN(was)} then)`] : null;
+  kp.innerHTML = [[fmtN(total), `early votes over ${posted.size} day${posted.size > 1 ? "s" : ""}`], vsPrior,
     [fmtN(best.n), `busiest day (${fmtDay(best.d)})`],
-    ...(selN ? [[fmtN(selN.n), `on ${fmtDay(sel)}`]] : [])]
+    isAvg(sel) ? avgKpi(sel) : selN ? [fmtN(selN.n), `on ${fmtDay(sel)}`] : null]
+    .filter(Boolean)
     .map(([v, k]) => `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 
   const W = Math.max(host.clientWidth, 320), H = 200, L = 52, R = 8, T = 10, B = 24;
-  const vmax = Math.max(...tot.map(x => x.n), 1);
+  const vmax = Math.max(...tot.map(x => Math.max(x.n, showPrior && priorOf(x.d) ? priorOf(x.d).n : 0)), 1);
   const stepRaw = vmax / 4, mag = 10 ** Math.floor(Math.log10(stepRaw));
   const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(x => x >= stepRaw), top = Math.ceil(vmax / step) * step;
-  const Y = v => T + (1 - v / top) * (H - T - B), bw = (W - L - R) / days.length, barW = Math.max(Math.min(bw - 2, 40), 2);
+  const Y = v => T + (1 - v / top) * (H - T - B), bw = (W - L - R) / days.length;
+  // Paired with the earlier election, each day holds two bars 2px apart.
+  const barW = showPrior ? Math.max(Math.min((bw - 6) / 2, 24), 2) : Math.max(Math.min(bw - 2, 40), 2);
+  const bar = (xl, v, fill) => { const y0 = Y(0), h = y0 - Y(v), r = Math.min(4, barW / 2, h);
+    // Rounded top, square baseline.
+    el("path", { d: `M${xl},${y0}V${y0 - h + r}Q${xl},${y0 - h} ${xl + r},${y0 - h}H${xl + barW - r}` +
+      `Q${xl + barW},${y0 - h} ${xl + barW},${y0 - h + r}V${y0}Z`, fill }, svg); };
   const svg = el("svg", { width: W, height: H, role: "img", "aria-label": "Early votes cast per day" }, host);
   for (let v = 0; v <= top; v += step) {
     el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v ? "var(--grid)" : "var(--axis)" }, svg);
@@ -919,38 +1068,36 @@ function renderTurnout() {
   }
   const every = Math.ceil(days.length / Math.max(1, Math.floor((W - L - R) / 70)));
   tot.forEach((x, i) => {
-    const cx = L + i * bw + bw / 2, h = Y(0) - Y(x.n), r = Math.min(4, barW / 2, h);
-    const y0 = Y(0), xl = cx - barW / 2;
-    // Rounded top, square baseline.
-    el("path", { d: `M${xl},${y0}V${y0 - h + r}Q${xl},${y0 - h} ${xl + r},${y0 - h}H${xl + barW - r}` +
-      `Q${xl + barW},${y0 - h} ${xl + barW},${y0 - h + r}V${y0}Z`,
-      fill: !sel || x.d === sel || !tot.some(t => t.d === sel) ? "var(--line)" : "var(--line-soft)" }, svg);
+    const cx = L + i * bw + bw / 2, y0 = Y(0), pr = showPrior ? priorOf(x.d) : null;
+    const xl = showPrior ? cx - barW - 1 : cx - barW / 2;
+    if (x.pending) { if (DAYS.includes(x.d) && !showPrior) text(svg, cx, y0 - 6, "not posted yet",
+      { "text-anchor": "middle", fill: "var(--muted)" }); }
+    else bar(xl, x.n, (isAvg(sel) ? AVG_KINDS[sel].has(x.d) : x.d === sel || !tot.some(t => t.d === sel && !t.pending)) ? "var(--turn)" : "var(--turn-soft)");
+    if (pr) bar(cx + 1, pr.n, "var(--prior)");
     if (i % every === 0) text(svg, cx, H - 6, fmtDay(x.d).replace(/^\w+, /, ""), { "text-anchor": "middle" });
     const hit = el("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }, svg);
-    hover(hit, () => `<b>${fmtDay(x.d)}</b>${fmtN(x.n)} early votes` +
-      (x.top.length ? `<br><span class="m">${x.top.map(([s, n]) => `${s}: ${fmtN(n)}`).join("<br>")}</span>` : ""));
+    hover(hit, () => { const pr = showPrior ? priorOf(x.d) : null, yr = EV[0] ? EV[0].slice(0, 4) : "";
+      return `<b>${fmtDay(x.d)}</b>` + (pr ? `<span class="m">day ${EV.indexOf(x.d) + 1} of early voting</span><br>` : "") +
+        (x.pending ? (DAYS.includes(x.d) ? "Not posted yet; the county posts each day's votes that evening." : "Not yet")
+          : `${pr ? yr + ": " : ""}${fmtN(x.n)} early votes`) +
+        (pr ? `<br>${PRIOR.year} (${fmtDay(pr.d)}): ${fmtN(pr.n)}` + (x.pending ? "" : ` <span class="m">(${pct(x.n, pr.n)})</span>`) : "") +
+        (x.top.length ? `<br><span class="m">${x.top.map(([s, n]) => `${s}: ${fmtN(n)}`).join("<br>")}</span>` : ""); });
     if (DAYS.includes(x.d)) { hit.style.cursor = "pointer"; hit.onclick = () => { fDay.value = x.d; onFilter(); }; }
   });
 }
 
-// Polling coverage, for Data notes and for breaking charts where the monitor missed polls.
-function pollGaps(d) {  // [start, end] minute ranges on day d when the monitor wasn't polling
-  const ts = [...new Set(ROWS.filter(r => day(r.t) === d).map(r => mins(r.t)))].sort((a, b) => a - b), out = [];
-  for (let i = 1; i < ts.length; i++) if (isGap(ts[i - 1], ts[i])) out.push([ts[i - 1], ts[i]]);
-  return { first: ts[0], last: ts[ts.length - 1], gaps: out };
-}
-// Typical by time of day: town x half-hour, averaged over every poll on every day.
+// Typical by time of day: town x half-hour, each site's standing reading averaged over every day,
+// then over the town's sites.
 (function renderTod() {
   const host = document.getElementById("tod");
-  const ok = ROWS.filter(r => r.min != null);
   document.getElementById("tod-sub").textContent =
     `Mean reported wait time in each half hour across all ${DAYS.length} day${DAYS.length > 1 ? "s" : ""} collected and all sites in the town. ` +
     (DAYS.length < 3 ? "This view gets more useful as more days are collected." : "");
-  if (!ok.length) { host.innerHTML = `<p class="empty">No data.</p>`; return; }
-  const slot = m => Math.floor(m / 30) * 30;
-  const acc = {}; ok.forEach(r => { const k = r.city + "|" + slot(mins(r.t)); (acc[k] = acc[k] || []).push(r.min); });
-  const slots = [...new Set(ok.map(r => slot(mins(r.t))))].sort((a, b) => a - b);
-  const s0 = slots[0], s1 = slots[slots.length - 1], cols = (s1 - s0) / 30 + 1;
+  const T = slotReadings(30);
+  if (T.s0 > T.s1) { host.innerHTML = `<p class="empty">No data.</p>`; return; }
+  const acc = {};
+  for (const site in T.per) for (const m in T.per[site]) (acc[siteCity[site] + "|" + m] = acc[siteCity[site] + "|" + m] || []).push(...T.per[site][m]);
+  const s0 = T.s0, s1 = T.s1, cols = (s1 - s0) / 30 + 1;
   const labelW = 130, rowH = 22, top = 4;
   const cw = Math.max(18, Math.min(44, (host.clientWidth - labelW - 8) / cols));
   const W = labelW + cols * cw + 8, H = top + CITIES.length * rowH + 22;
@@ -963,27 +1110,13 @@ function pollGaps(d) {  // [start, end] minute ranges on day d when the monitor 
       const rect = el("rect", { x: labelW + j * cw, y: y + 1, width: cw - 2, height: rowH - 2, rx: 3,
         fill: bandVar(bandOf(v)) }, svg);
       hover(rect, () => `<b>${c}, ${clock(m)}–${clock(m + 30)}</b>` +
-        (vals ? `Average ${fmtMin(v)}<br><span class="m">${vals.length} observations</span>` : "No data"));
+        (vals ? `Average ${fmtMin(v)}<br><span class="m">${vals.length} site-day${vals.length > 1 ? "s" : ""}</span>` : "No data"));
     }
   });
   for (let j = 0; j < cols; j++) {
     const m = s0 + j * 30;
     if (m % 60 === 0 && (cw >= 30 || m % 120 === 0)) text(svg, labelW + j * cw, H - 6, clock(m), { "text-anchor": "start" });
   }
-})();
-
-// Data notes: polling coverage per day (gaps found automatically) plus --note text.
-(function renderNotes() {
-  const items = DAYS.map(d => {
-    const pg = pollGaps(d);
-    const gaps = pg.gaps.map(([a, b]) => `${clock(a)}–${clock(b)}`);
-    return `<b>${fmtDay(d)}:</b> polled ${clock(pg.first)}–${clock(pg.last)}` +
-      (gaps.length ? `; no polls ${gaps.join(", ")} (the monitor wasn't running, so reported wait times and site updates in ` +
-        `${gaps.length > 1 ? "those stretches" : "that stretch"} weren't recorded and show as no data)` : "; no gaps");
-  });
-  const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  document.getElementById("notes").innerHTML = [...(DATA.notes || []).map(esc), ...items]
-    .map(t => `<li>${t}</li>`).join("");
 })();
 
 // Reload every 5 minutes to pick up republished reports. Filters survive (localStorage) and the
