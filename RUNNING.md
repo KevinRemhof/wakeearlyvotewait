@@ -117,10 +117,10 @@ Adjust the screenshot height if the page grows. After you push, GitHub Pages
 publishes `docs/` to https://rtphokie.github.io/wakeearlyvotewait/ within a minute
 or two.
 
-### Automatically, every 20 minutes
+### Automatically, every 10 minutes
 
-`publish_report.sh` rebuilds the report and pushes it. It skips the run if the CSV
-hasn't changed since the last publish, retakes the screenshot once a day, and
+`publish_report.sh` rebuilds the report and pushes it. It skips the run unless a
+site posted a new report (or `visualize_waits.py` changed) since the last publish, retakes the screenshot once a day, and
 commits only the CSV and `docs/`. It runs from launchd, so it catches up after the
 Mac sleeps. After `END_DATE` (Nov 1) it unloads its own job.
 
@@ -141,7 +141,7 @@ paths changed to match your machine:
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>PYTHON</key><string>/path/to/python3.11</string>
   </dict>
-  <key>StartInterval</key><integer>1200</integer>
+  <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/path/to/wakeearlyvotewait/logs/publish.log</string>
   <key>StandardErrorPath</key><string>/path/to/wakeearlyvotewait/logs/publish.log</string>
@@ -160,6 +160,76 @@ launchctl bootout gui/$(id -u)/com.rtphokie.wakeearlyvotewait.publish         # 
 
 Pushing uses your `gh` login (`gh auth login`), so no other credentials are needed.
 
+## 4. Statewide report (2026_NC_Voting)
+
+`nc_voting_report.py` builds `docs/2026_NC_Voting/index.html` from State Board
+files in `ncsbe_cache/`. One-time setup downloads the earlier elections and
+builds the history file (about 3 GB of downloads, 10 minutes):
+
+```sh
+B=https://s3.amazonaws.com/dl.ncsbe.gov
+cd ncsbe_cache
+for d in 2002_11_05 2004_11_02 2006_11_07 2008_11_04 2010_11_02 2012_11_06 \
+         2014_11_04 2016_11_08 2018_11_06 2020_11_03 2022_11_08 2024_11_05; do
+  curl -fO "$B/ENRS/$d/absentee_${d//_/}.zip"
+done
+curl -fO $B/data/ncvhis_Statewide.zip
+curl -fO $B/data/ncvoter_Statewide.zip
+curl -fo onestop_sites_20221108.pdf "$B/One-Stop_Early_Voting/2022/One-Stop%20Voting%20Sites%20for%20the%20November%208,%202022%20Election.pdf"
+curl -fo onestop_sites_20241105.pdf "$B/One-Stop_Early_Voting/2024/Early-Voting-Site-List-2024-General.pdf"
+curl -fo onestop_sites_20261103.pdf "$B/One-Stop_Early_Voting/2026/Early_Voting_Site_List_November_2026.pdf"
+cd ..
+./build_ballot_history.py      # -> ncsbe_cache/ballots_federal.tsv.gz
+./build_site_crosswalk.py      # -> ncsbe_cache/onestop_site_crosswalk.json, onestop_site_changes.json
+./build_site_results.py        # -> ncsbe_cache/onestop_site_results.json (also run by each report build)
+```
+
+Then build the report:
+
+```sh
+./nc_voting_report.py           # downloads a newer 2026 file if there is one; exits 3 if the report is current
+./nc_voting_report.py --force --open
+./nc_voting_report.py --no-fetch --force   # use the cached 2026 file
+```
+
+A build takes a few minutes, longer as the 2026 file grows. The page shows only
+totals; the files it reads list individual voters and stay in `ncsbe_cache/`.
+
+### Automatically, as soon as the State Board posts a new file
+
+`publish_nc_report.sh` checks for a newer State Board file, rebuilds the report
+when there is one (or when the report code changed since the last publish), and
+commits and pushes only `docs/2026_NC_Voting/`. It shares `publish_report.sh`'s
+lock, so the two never push at the same time. After `END_DATE` (Nov 30, after
+the canvass) it unloads its own job. Install it like the wait-time job, as
+`~/Library/LaunchAgents/com.rtphokie.wakeearlyvotewait.publish-nc.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.rtphokie.wakeearlyvotewait.publish-nc</string>
+  <key>ProgramArguments</key>
+  <array><string>/path/to/wakeearlyvotewait/publish_nc_report.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHON</key><string>/path/to/python3.11</string>
+  </dict>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/path/to/wakeearlyvotewait/logs/publish_nc.log</string>
+  <key>StandardErrorPath</key><string>/path/to/wakeearlyvotewait/logs/publish_nc.log</string>
+</dict>
+</plist>
+```
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rtphokie.wakeearlyvotewait.publish-nc.plist
+tail -f logs/publish_nc.log
+```
+
 ## Logs
 
 Each script logs to `logs/`, which isn't committed:
@@ -169,6 +239,7 @@ Each script logs to `logs/`, which isn't committed:
 | `logs/monitor.log` | Monitor start/stop, every poll (`poll ok: 18 sites; changed: Cary Senior Center 15-30 Minutes -> 30-60 Minutes`), and fetch errors |
 | `logs/scheduler.log` | `run_during_early_voting.py` starting, stopping and restarting the monitor around voting hours |
 | `logs/publish.log` | Every publish run: skipped (no new readings), published (with the commit), or failed (with the line) |
+| `logs/publish_nc.log` | Every statewide-report run: skipped (no new State Board file), published, or failed |
 
 Use `--log FILE` to log somewhere else, or `--log ''` to turn logging off, for the
 monitor and the scheduler.

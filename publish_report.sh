@@ -1,8 +1,8 @@
 #!/bin/bash
 # Rebuild the report from the CSV and publish it to GitHub Pages.
 #
-# Meant to run every 20 minutes from launchd (see RUNNING.md). Each run:
-#   - does nothing if neither the CSV nor visualize_waits.py changed since the last publish
+# Meant to run every 10 minutes from launchd (see RUNNING.md). Each run:
+#   - does nothing unless a site posted a new report or visualize_waits.py changed since the last publish
 #   - rebuilds docs/index.html (with county and State Board turnout)
 #   - retakes docs/report.png once a day, to keep the repo from bloating
 #   - commits only the CSV and docs/, then pushes; Pages updates a minute later
@@ -56,12 +56,22 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK"' EXIT
 
-# Publish when there are new readings, or the report code changed since the last publish.
+# Publish when a site posted a new report, or the report code changed since the last publish.
+# The monitor appends a row per site on every poll, so new rows alone don't mean anything changed:
+# compare the (site, update time) pairs against the last published CSV.
 code_changed() {
     [[ "$(git log -1 --format=%ct -- visualize_waits.py)" -gt "$(git log -1 --format=%ct -- docs/index.html)" ]]
 }
-if git diff --quiet -- "$CSV" && ! code_changed; then
-    log "no new readings in $CSV; nothing to publish"
+new_reports() {
+    git show "HEAD:$CSV" 2>/dev/null | "$PYTHON" -c '
+import csv, sys
+seen = {(r["site"], r["site_updated_at"]) for r in csv.DictReader(sys.stdin)}
+with open(sys.argv[1], newline="") as f:
+    sys.exit(0 if any((r["site"], r["site_updated_at"]) not in seen for r in csv.DictReader(f)) else 1)
+' "$CSV"
+}
+if ! new_reports && ! code_changed; then
+    log "no new site reports since the last publish; nothing to publish"
     exit 0
 fi
 
