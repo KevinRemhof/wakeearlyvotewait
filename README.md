@@ -51,9 +51,11 @@ Pick any county or statewide, and compare with 2024 or 2022:
 - **Ballots cast so far** and one-stop ballots by day of early voting, against
   the same day in 2024 and 2022.
 - **First-time one-stop voters:** no one-stop ballot in any federal general
-  election since 2002, by voting history, age and party.
-- **Earlier or later:** whether voters are casting ballots earlier in the period
-  than they did before.
+  election since 2002 or any NC election since 2016, by voting history, and those
+  who have voted in NC before by age.
+- **Earlier or later:** one-stop voters who voted on Election Day in 2022 or
+  2024, are voting earlier than before, about the same time, or later; and all
+  voters compared with each earlier election.
 - **Same site, or a different one:** returning one-stop voters at the same
   site, a different site, or displaced because their old site closed. Sites are
   matched by street address.

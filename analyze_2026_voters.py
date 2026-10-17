@@ -4,7 +4,7 @@
 Inputs (ncsbe_cache/):
   absentee_20261103.zip         2026 ballots so far (one-stop + mail), with demographics
   ballots_federal.tsv.gz        normalized 2002-2024 ballots (build_ballot_history.py)
-  ncvhis_Statewide.zip          voter history, last ~10 years (adds Election Day votes)
+  ncvhis_Statewide.zip          voter history, every NC election since 2016 (adds Election Day, primary and municipal votes)
   onestop_site_crosswalk.json   physical-site ids (build_site_crosswalk.py)
 
 Output: aggregates only (statewide and per county), never individual voters.
@@ -22,19 +22,12 @@ import gzip
 import json
 import sys
 
-from build_ballot_history import CACHE, counted, parse_date, zip_rows
+from build_ballot_history import CACHE, ELECTIONS, counted, parse_date, zip_rows
 
 E26 = "20261103"
 EDAY26 = dt.date(2026, 11, 3)
 COMPARE = ["20241105", "20221108"]
 LAST5 = ["20161108", "20181106", "20201103", "20221108", "20241105"]
-GENERAL_LBL = {
-    "11/08/2016": "20161108",
-    "11/06/2018": "20181106",
-    "11/03/2020": "20201103",
-    "11/08/2022": "20221108",
-    "11/05/2024": "20241105",
-}
 HIST_ONESTOP = {
     "ABSENTEE ONESTOP",
     "ABSENTEE CURBSIDE",
@@ -48,7 +41,6 @@ HIST_ELECTION_DAY = {
     "TRANSFER",
 }
 AGES = ["18-25", "26-40", "41-65", "66+"]
-PARTIES = ["DEM", "REP", "UNA", "LIB", "GRE", "NLB", "JFA"]
 # Early voting runs from 19 to 3 days before Election Day.
 EV_FIRST, EV_LAST = 19, 3
 
@@ -94,7 +86,6 @@ def load_2026(sid):
             "dbe": (EDAY26 - d).days if d else None,
             "site": sid.get((E26, r["county_desc"], r["site_name"])) if onestop else None,
             "site_name": r["site_name"] if onestop else "",
-            "party": r["voter_party_code"],
             "age": age_band(r["age"]),
         }
     return voters, latest
@@ -116,12 +107,14 @@ def load_prior(ncids):
 
 
 def load_hist(ncids):
-    """ncid -> election -> voting_method for 2016-2024 general elections."""
+    """ncid -> election date (YYYYMMDD) -> voting_method, for every NC election before
+    this one in the voter history file (2016 on: generals, primaries, municipal)."""
     hist = collections.defaultdict(dict)
     for r in zip_rows(CACHE / "ncvhis_Statewide.zip", "\t"):
-        e = GENERAL_LBL.get(r["election_lbl"])
-        if e and r["ncid"] in ncids:
-            hist[r["ncid"]][e] = r["voting_method"]
+        if r["ncid"] in ncids and r["voting_method"] != "ELIGIBLE DID NOT VOTE":
+            m, d, y = r["election_lbl"].split("/")
+            if f"{y}{m}{d}" < E26:
+                hist[r["ncid"]][f"{y}{m}{d}"] = r["voting_method"]
     return hist
 
 
@@ -169,6 +162,16 @@ def classify(v, p, h, sid, open26):
                 c[f"w{y}"] = "moved_open" if there in open26 else "moved_closed"
         elif pe and pe[0] == "ONESTOP":
             c[f"from{y}"] = sid.get((e, pe[2], pe[3]))  # now voting by mail
+    # Usual timing: 2026 one-stop voters against their Election Day votes, or their latest
+    # one-stop vote (fewest days before Election Day), in the comparison elections.
+    if v["method"] == "ONESTOP":
+        days = [p[e][1] for e in COMPARE if p.get(e) and p[e][0] == "ONESTOP" and p[e][1] is not None]
+        if any(h.get(e) in HIST_ELECTION_DAY for e in COMPARE):
+            c["usual"] = "election_day"
+        elif not days or v["dbe"] is None:
+            c["usual"] = "none"
+        else:
+            c["usual"] = "earlier" if v["dbe"] > min(days) else "same" if v["dbe"] == min(days) else "later"
     c["part"] = sum(1 for e in LAST5 if e in p or e in h)
     return c
 
@@ -181,26 +184,27 @@ def new_scope():
         "daily": collections.Counter(),
         "first": collections.Counter(),
         "first_age": collections.defaultdict(lambda: [0, 0]),
-        "first_party": collections.defaultdict(lambda: [0, 0]),
         "part": collections.Counter(),
+        "usual": collections.Counter(),
         **{f"t{e[:4]}": collections.Counter() for e in COMPARE},
         **{f"w{e[:4]}": collections.Counter() for e in COMPARE},
     }
 
 
 def prior_daily():
-    """{year: {county: {days_before: one-stop ballots}}} for 2022 and 2024, cached."""
+    """{year: {county: {days_before: one-stop ballots}}} for every federal general election
+    before 2026 (2002 on), over the widest early voting period (20 to 3 days out), cached."""
     src = CACHE / "ballots_federal.tsv.gz"
-    cache = CACHE / "prior_daily.json"
+    cache = CACHE / "prior_daily_all.json"
     if cache.exists() and cache.stat().st_mtime >= src.stat().st_mtime:
         return json.load(open(cache))
-    out = {e[:4]: collections.defaultdict(collections.Counter) for e in COMPARE}
+    out = {e[:4]: collections.defaultdict(collections.Counter) for e in ELECTIONS if e != E26}
     with gzip.open(src, "rt") as f:
         for r in csv.DictReader(f, delimiter="\t"):
             y = r["election"][:4]
             if y in out and r["method"] == "ONESTOP" and r["days_before"]:
                 d = int(r["days_before"])
-                if EV_LAST <= d <= EV_FIRST:
+                if EV_LAST <= d <= 20:
                     out[y][r["county"]][d] += 1
                     out[y]["NC"][d] += 1
     cache.write_text(json.dumps(out))
@@ -235,9 +239,10 @@ def analyze():
                 if v["dbe"] is not None and EV_LAST <= v["dbe"] <= EV_FIRST:
                     s["daily"][v["dbe"]] += 1
                 s["first"][c["first"] or "returning"] += 1
-                for key, val in (("first_age", v["age"]), ("first_party", v["party"])):
-                    s[key][val][1] += 1
-                    s[key][val][0] += c["first"] is not None
+                s["usual"][c["usual"]] += 1
+                # First-time one-stop voters who have voted in NC before, by age.
+                s["first_age"][v["age"]][1] += 1
+                s["first_age"][v["age"]][0] += c["first"] in ("mail", "election_day")
             s["part"][c["part"]] += 1
             for e in COMPARE:
                 y = e[:4]
@@ -268,8 +273,8 @@ def analyze():
             "daily": {str(d): n for d, n in sorted(s["daily"].items())},
             "first": dict(s["first"]),
             "first_age": {a: s["first_age"][a] for a in AGES if a in s["first_age"]},
-            "first_party": {p: s["first_party"][p] for p in PARTIES if p in s["first_party"]},
             "part": {str(i): s["part"][i] for i in range(6)},
+            "usual": dict(s["usual"]),
             **{f"t{e[:4]}": dict(s[f"t{e[:4]}"]) for e in COMPARE},
             **{f"w{e[:4]}": dict(s[f"w{e[:4]}"]) for e in COMPARE},
         }

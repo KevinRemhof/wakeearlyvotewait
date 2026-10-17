@@ -312,6 +312,21 @@ summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
     <details><summary>Table</summary><div class="scroll" id="daily-table"></div></details>
   </section>
 
+  <section class="card" aria-labelledby="h-hist">
+    <h2 id="h-hist">One-stop ballots by day, every federal general election since 2002</h2>
+    <p class="sub" id="hist-sub"></p>
+    <div class="filters" style="margin-top:0">
+      <span class="seg" id="hist-kind"><button data-v="midterm">Midterms</button><button data-v="pres">Presidential</button><button data-v="all">All</button></span>
+      <span class="seg" id="hist-measure"><button data-v="day">Per day</button><button data-v="cum">Running total</button></span>
+    </div>
+    <div class="legend" id="hist-legend"></div>
+    <div id="hist"></div>
+    <p class="foot">Days before Election Day, which falls on a Tuesday every year, so each day lines up by weekday.
+      Early voting ran 19 to 3 days out in most years, 20 to 3 in 2018, and 12 to 3 in 2014. Counts are one-stop ballots
+      from the State Board's absentee files, by the date each was cast; Election Day and mail ballots aren't included.</p>
+    <details><summary>Table</summary><div class="scroll" id="hist-table"></div></details>
+  </section>
+
   <section class="card" aria-labelledby="h-first">
     <h2 id="h-first">First-time one-stop voters</h2>
     <p class="sub" id="first-sub"></p>
@@ -320,6 +335,10 @@ summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 
   <section class="card" aria-labelledby="h-timing">
     <h2 id="h-timing">Voting earlier or later than before</h2>
+    <p class="sub" id="usual-sub"></p>
+    <div class="legend" id="usual-legend"></div>
+    <div id="usual"></div>
+    <h3>Compared with each election</h3>
     <p class="sub" id="timing-sub"></p>
     <div class="legend" id="timing-legend"></div>
     <div id="timing"></div>
@@ -395,7 +414,7 @@ summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <script>
 const D = /*__DATA__*/null;
 const YEARS = ["2022", "2024", "2026"];
-const EDAY = { "2022": "2022-11-08", "2024": "2024-11-05", "2026": "2026-11-03" };
+const EDAY = {"2002": "2002-11-05", "2004": "2004-11-02", "2006": "2006-11-07", "2008": "2008-11-04", "2010": "2010-11-02", "2012": "2012-11-06", "2014": "2014-11-04", "2016": "2016-11-08", "2018": "2018-11-06", "2020": "2020-11-03", "2022": "2022-11-08", "2024": "2024-11-05", "2026": "2026-11-03"};
 const EV_DAYS = 17, EV_FIRST = 19;  // early voting: 19 through 3 days before Election Day
 const fmtN = n => n == null ? "—" : Math.round(n).toLocaleString();
 const pct = (n, d) => d ? 100 * n / d : null;
@@ -573,6 +592,95 @@ function renderDaily() {
 function niceStep(raw) { const p = 10 ** Math.floor(Math.log10(raw || 1)), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
 function compact(v) { return v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(0)}K` : String(v); }
 
+// ---- one-stop ballots by day, every federal general election ----
+const HIST_FIRST = 20;
+let histKind = "midterm", histMeasure = "day";
+const isMidterm = y => (+y - 2002) % 4 === 0;
+// Earlier elections share one hue, lighter the older they are; presidential years are dashed.
+function histColor(y, years) {
+  if (y === "2026") return "var(--y2026)";
+  const prior = years.filter(v => v !== "2026"), i = prior.indexOf(y);
+  const mix = prior.length > 1 ? 30 + 70 * i / (prior.length - 1) : 100;
+  return `color-mix(in oklab, var(--y2024) ${Math.round(mix)}%, var(--surface))`;
+}
+function renderHist() {
+  const all = [...Object.keys(D.prior_daily), "2026"].sort();
+  const years = all.filter(y => y === "2026" || histKind === "all" || (histKind === "midterm") === isMidterm(y));
+  const last26 = evDay(), cum = histMeasure === "cum";
+  const ser = {};
+  for (const y of years) {
+    const src = y === "2026" ? S().daily : ((D.prior_daily[y] || {})[county] || {});
+    const days = Object.keys(src).map(Number);
+    if (!days.length) { ser[y] = []; continue; }
+    // Start at the first day with real volume; a few ballots are dated before early voting opened.
+    const peak = Math.max(...days.map(d => src[d])), pts = [];
+    const first = Math.max(...days.filter(d => d <= HIST_FIRST && src[d] >= peak * 0.05));
+    let run = 0;
+    for (let dbe = first; dbe >= 3; dbe--) {
+      if (y === "2026" && (last26 == null || dbe < last26)) break;
+      run += src[dbe] || 0;
+      pts.push({ dbe, n: src[dbe] || 0, cum: run });
+    }
+    ser[y] = pts;
+  }
+  const val = p => cum ? p.cum : p.n;
+  for (const [id, cur, set] of [["hist-kind", histKind, v => { histKind = v; }], ["hist-measure", histMeasure, v => { histMeasure = v; }]])
+    for (const b of $(id).querySelectorAll("button")) { b.classList.toggle("on", b.dataset.v === cur); b.onclick = () => { set(b.dataset.v); renderHist(); }; }
+  fill("hist-sub", `${cum ? "Running total of" : "Daily"} one-stop ballots in ${areaName()} by days before Election Day, `
+    + `${histKind === "midterm" ? "in every midterm election" : histKind === "pres" ? "in every presidential election, with 2026" : "in every federal general election"} since 2002.`);
+  const box = $("hist");
+  const W = Math.max(320, box.clientWidth || 700), H = 300, m = { l: 56, r: 48, t: 10, b: 30 };
+  const maxY = Math.max(1, ...years.flatMap(y => ser[y].map(val)));
+  const step = niceStep(maxY / 4), top = Math.ceil(maxY / step) * step;
+  const X = dbe => m.l + (HIST_FIRST - dbe) / (HIST_FIRST - 3) * (W - m.l - m.r);
+  const Y = v => m.t + (1 - v / top) * (H - m.t - m.b);
+  const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `One-stop ballots by days before Election Day, ${years.join(", ")}, ${areaName()}` });
+  for (let v = 0; v <= top; v += step) {
+    s("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: v ? "var(--grid)" : "var(--axis)", "stroke-width": 1 }, svg);
+    s("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, svg).textContent = compact(v);
+  }
+  for (let d = HIST_FIRST; d >= 3; d -= (W < 560 ? 4 : 2)) s("text", { x: X(d), y: H - 10, "text-anchor": "middle" }, svg).textContent = d === HIST_FIRST ? `${d} days before` : d;
+  const ends = [];
+  for (const y of years) {   // oldest first, so 2026 and recent years draw on top
+    const pts = ser[y]; if (!pts.length) continue;
+    const c = histColor(y, years);
+    s("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${X(p.dbe)},${Y(val(p))}`).join(""), fill: "none", stroke: c,
+      "stroke-width": y === "2026" ? 3 : 2, "stroke-dasharray": y !== "2026" && !isMidterm(y) ? "5 3" : null,
+      "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    const e = pts[pts.length - 1];
+    if (y === "2026") s("circle", { cx: X(e.dbe), cy: Y(val(e)), r: 4, fill: c, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    ends.push({ y, py: Y(val(e)), x: X(e.dbe) });
+  }
+  // Year labels at line ends, skipping any that would collide (2026 always wins).
+  ends.sort((a, b) => (b.y === "2026") - (a.y === "2026") || a.py - b.py);
+  const placed = [];
+  for (const e of ends) {
+    if (placed.some(p => Math.abs(p.py - e.py) < 13 && Math.abs(p.x - e.x) < 34)) continue;
+    placed.push(e);
+    s("text", { x: e.x + 6, y: e.py + 4, class: "end" }, svg).textContent = e.y;
+  }
+  const cross = s("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const hit = s("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const d = Math.max(3, Math.min(HIST_FIRST, Math.round(HIST_FIRST - (ev.clientX - r.left - m.l) / (W - m.l - m.r) * (HIST_FIRST - 3))));
+    cross.setAttribute("x1", X(d)); cross.setAttribute("x2", X(d)); cross.setAttribute("visibility", "visible");
+    showTip(ev, `${d} days before Election Day`, years.slice().reverse().map(y => {
+      const p = ser[y].find(q => q.dbe === d);
+      return [histColor(y, years), p ? fmtN(val(p)) : "—", p ? `${y} (${fmtDate(dateOf(y, d))})` : `${y}: no early voting${y === "2026" ? " yet" : ""}`];
+    }));
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  box.replaceChildren(svg);
+  fill("hist-legend", ...years.slice().reverse().map(y => h("span", {}, h("span", { class: "lk", style: {
+    background: y === "2026" || isMidterm(y) ? histColor(y, years) : `repeating-linear-gradient(90deg, ${histColor(y, years)} 0 5px, transparent 5px 8px)` } }), y)));
+  const rows = [];
+  for (let d = HIST_FIRST; d >= 3; d--) rows.push(h("tr", {}, h("td", {}, `${d} days before`),
+    ...years.map(y => { const p = ser[y].find(q => q.dbe === d); return h("td", { class: "num" }, p ? fmtN(val(p)) : "—"); })));
+  fill("hist-table", h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Day"), ...years.map(y => h("th", { class: "num" }, y)))), h("tbody", {}, rows)));
+}
+
 // ---- horizontal bars (single series) ----
 function hbars(title, items, max) {
   max = max || Math.max(1e-9, ...items.map(i => i.v));
@@ -584,16 +692,15 @@ function hbars(title, items, max) {
   })));
 }
 function renderFirst() {
-  const x = S(), f = x.first, firstN = x.onestop - (f.returning || 0);
-  fill("first-sub", `${fmtN(firstN)} of ${fmtN(x.onestop)} one-stop voters in ${areaName()} (${fmtP(pct(firstN, x.onestop))}) have no one-stop ballot in any federal general election since 2002.`);
-  const kinds = [["new", "No earlier vote on record"], ["mail", "Voted by mail before"], ["election_day", "Voted on Election Day"]];
-  const share = (arr) => arr ? pct(arr[0], arr[1]) : null;
-  const ages = Object.entries(x.first_age).map(([a, v]) => ({ name: a, v: share(v) || 0, label: fmtP(share(v)), note: `of ${fmtN(v[1])} one-stop voters aged ${a}` }));
-  const parties = Object.entries(x.first_party).filter(([, v]) => v[1] >= 50).map(([p, v]) => ({ name: p, v: share(v) || 0, label: fmtP(share(v)), note: `of ${fmtN(v[1])} one-stop voters` }));
+  const x = S(), f = x.first, firstN = x.onestop - (f.returning || 0), beforeN = (f.mail || 0) + (f.election_day || 0);
+  fill("first-sub", `${fmtN(firstN)} of ${fmtN(x.onestop)} one-stop voters in ${areaName()} (${fmtP(pct(firstN, x.onestop))}) have no earlier one-stop ballot on record:`
+    + " none in a federal general election since 2002, or in any NC election (including primaries and municipal elections) since 2016.");
+  const kinds = [["new", "No earlier NC vote on record"], ["mail", "Voted before, by mail"], ["election_day", "Voted before, on Election Day"]];
+  const ages = Object.entries(x.first_age).filter(([a]) => a !== "unknown")
+    .map(([a, v]) => ({ name: a, v: v[0], label: `${fmtN(v[0])} (${fmtP(pct(v[0], beforeN), 0)})`, note: `${fmtP(pct(v[0], v[1]))} of one-stop voters aged ${a}` }));
   fill("first",
     hbars("Their voting history", kinds.map(([k, n]) => ({ name: n, v: f[k] || 0, label: `${fmtN(f[k] || 0)} (${fmtP(pct(f[k] || 0, firstN), 0)})` }))),
-    hbars("Share of one-stop voters who are first-timers, by age", ages, 100),
-    hbars("By party (groups of 50+ voters)", parties, 100));
+    hbars(`Voted in NC before, first time one-stop (${fmtN(beforeN)}), by age`, ages));
 }
 
 // ---- 100% stacked bars ----
@@ -628,9 +735,24 @@ const TIMING = [
   { k: "same", name: "Same day of early voting", color: "var(--mid)" },
   { k: "later", name: "Later", color: "var(--later)" },
 ];
+const USUAL = [
+  { k: "election_day", name: "Voted on Election Day in 2022 or 2024", color: "var(--ed)" },
+  { k: "earlier", name: "Earlier than before", color: "var(--earlier)" },
+  { k: "same", name: "About the same time as before", color: "var(--mid)" },
+  { k: "later", name: "Later than before", color: "var(--later)" },
+  { k: "none", name: "No one-stop or Election Day vote in 2022 or 2024", color: "var(--county)" },
+];
 function renderTiming() {
-  const x = S();
-  fill("timing-sub", `2026 voters in ${areaName()} who also voted in each earlier election, by when they voted then compared with now.`);
+  const x = S(), u = x.usual || {}, parts = USUAL.map(p => ({ ...p, n: u[p.k] || 0 }));
+  const uTot = parts.reduce((a, p) => a + p.n, 0);
+  fill("usual-sub", `${fmtN(uTot)} one-stop voters in ${areaName()} so far, by when they voted compared with 2022 and 2024.`
+    + " \"Before\" is the earlier election in which they voted closest to Election Day; \"about the same time\" is the same number of days before Election Day (and so the same weekday)."
+    + " Anyone who voted on Election Day in either election is counted as an Election Day voter.");
+  legend("usual-legend", USUAL);
+  fill("usual", uTot ? [h("div", { class: "stack-row" }, h("div", { class: "y" }, "2026"), stack(parts, uTot)),
+    h("div", { class: "kpis" }, parts.map(p => h("div", { class: "kpi" }, h("div", { class: "v" }, fmtP(pct(p.n, uTot), 0)),
+      h("div", { class: "k" }, `${p.name} (${fmtN(p.n)})`))))] : h("p", { class: "empty" }, "No one-stop ballots yet."));
+  fill("timing-sub", `All 2026 voters in ${areaName()}, including mail, who also voted in each earlier election, by when they voted then compared with now.`);
   legend("timing-legend", TIMING);
   fill("timing", ["2024", "2022"].map(y => {
     const t = x["t" + y] || {}, parts = TIMING.map(p => ({ ...p, n: t[p.k] || 0 }));
@@ -853,7 +975,7 @@ function update() {
   writeHash();
   $("f-county").value = county;
   for (const b of $("f-cmp").querySelectorAll("button")) { b.classList.toggle("on", b.dataset.y === cmp); b.setAttribute("aria-pressed", b.dataset.y === cmp); }
-  renderKpis(); renderDaily(); renderFirst(); renderTiming(); renderWhere();
+  renderKpis(); renderDaily(); renderHist(); renderFirst(); renderTiming(); renderWhere();
   renderFlows(); renderSites(); renderChanges(); renderPart(); renderCounties();
 }
 readHash();
