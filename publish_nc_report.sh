@@ -61,7 +61,7 @@ if [[ "$(git log -1 --format=%ct -- "${CODE[@]}")" -gt "$(git log -1 --format=%c
 fi
 
 status=0
-"$PYTHON" nc_voting_report.py -o "$OUT_DIR/index.html" "${force[@]}" || status=$?
+"$PYTHON" nc_voting_report.py -o "$OUT_DIR/index.html" ${force[@]+"${force[@]}"} || status=$?
 if [[ $status -eq 3 ]]; then
     log "no new State Board file since the last publish; nothing to publish"
     exit 0
