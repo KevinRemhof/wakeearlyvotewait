@@ -40,7 +40,7 @@ HIST_ELECTION_DAY = {
     "PROVISIONAL",
     "TRANSFER",
 }
-AGES = ["18-25", "26-40", "41-65", "66+"]
+AGES = ["18-20", "21-25", "26-40", "41-65", "66+"]
 # Early voting runs from 19 to 3 days before Election Day.
 EV_FIRST, EV_LAST = 19, 3
 
@@ -50,7 +50,10 @@ def age_band(a):
         a = int(a)
     except ValueError:
         return "unknown"
-    return "18-25" if a < 26 else "26-40" if a < 41 else "41-65" if a < 66 else "66+"
+    for below, band in zip((21, 26, 41, 66), AGES):
+        if a < below:
+            return band
+    return AGES[-1]
 
 
 def load_crosswalk():
@@ -64,7 +67,9 @@ def load_crosswalk():
             "name": latest["site_name"],
             "address": s["address"],
             "years": sorted(e[:4] for e in s["elections"]),
-            "ballots": {e[:4]: v["one_stop_ballots"] for e, v in s["elections"].items()},
+            "ballots": {
+                e[:4]: v["one_stop_ballots"] for e, v in s["elections"].items()
+            },
         }
         for e, v in s["elections"].items():
             ids[(e, s["county"], v["site_name"])] = s["id"]
@@ -85,7 +90,9 @@ def load_2026(sid):
             "county": r["county_desc"],
             "method": "ONESTOP" if onestop else "MAIL",
             "dbe": (EDAY26 - d).days if d else None,
-            "site": sid.get((E26, r["county_desc"], r["site_name"])) if onestop else None,
+            "site": sid.get((E26, r["county_desc"], r["site_name"]))
+            if onestop
+            else None,
             "site_name": r["site_name"] if onestop else "",
             "age": age_band(r["age"]),
         }
@@ -141,7 +148,11 @@ def classify(v, p, h, sid, open26):
         pe, he = p.get(e), h.get(e)
         if pe and pe[1] is not None and v["dbe"] is not None:
             c[f"t{y}"] = (
-                "earlier" if v["dbe"] > pe[1] else "same" if v["dbe"] == pe[1] else "later"
+                "earlier"
+                if v["dbe"] > pe[1]
+                else "same"
+                if v["dbe"] == pe[1]
+                else "later"
             )
         elif he in HIST_ELECTION_DAY:
             c[f"t{y}"] = "election_day"
@@ -166,13 +177,23 @@ def classify(v, p, h, sid, open26):
     # Usual timing: 2026 one-stop voters against their Election Day votes, or their latest
     # one-stop vote (fewest days before Election Day), in the comparison elections.
     if v["method"] == "ONESTOP":
-        days = [p[e][1] for e in COMPARE if p.get(e) and p[e][0] == "ONESTOP" and p[e][1] is not None]
+        days = [
+            p[e][1]
+            for e in COMPARE
+            if p.get(e) and p[e][0] == "ONESTOP" and p[e][1] is not None
+        ]
         if any(h.get(e) in HIST_ELECTION_DAY for e in COMPARE):
             c["usual"] = "election_day"
         elif not days or v["dbe"] is None:
             c["usual"] = "none"
         else:
-            c["usual"] = "earlier" if v["dbe"] > min(days) else "same" if v["dbe"] == min(days) else "later"
+            c["usual"] = (
+                "earlier"
+                if v["dbe"] > min(days)
+                else "same"
+                if v["dbe"] == min(days)
+                else "later"
+            )
     c["part"] = sum(1 for e in LAST5 if e in p or e in h)
     return c
 
@@ -184,7 +205,7 @@ def new_scope():
         "mail": 0,
         "daily": collections.Counter(),
         "first": collections.Counter(),
-        "first_age": collections.defaultdict(lambda: [0, 0]),
+        "first_age": collections.defaultdict(lambda: [0, 0, 0]),
         "part": collections.Counter(),
         "usual": collections.Counter(),
         **{f"t{e[:4]}": collections.Counter() for e in COMPARE},
@@ -199,7 +220,11 @@ def prior_daily():
     cache = CACHE / "prior_daily_all.json"
     if cache.exists() and cache.stat().st_mtime >= src.stat().st_mtime:
         return json.load(open(cache))
-    out = {e[:4]: collections.defaultdict(collections.Counter) for e in ELECTIONS if e != E26}
+    out = {
+        e[:4]: collections.defaultdict(collections.Counter)
+        for e in ELECTIONS
+        if e != E26
+    }
     with gzip.open(src, "rt") as f:
         for r in csv.DictReader(f, delimiter="\t"):
             y = r["election"][:4]
@@ -241,9 +266,10 @@ def analyze():
                     s["daily"][v["dbe"]] += 1
                 s["first"][c["first"] or "returning"] += 1
                 s["usual"][c["usual"]] += 1
-                # First-time one-stop voters who have voted in NC before, by age.
+                # By age: [first-time one-stop who voted in NC before, all one-stop, no earlier NC vote].
                 s["first_age"][v["age"]][1] += 1
                 s["first_age"][v["age"]][0] += c["first"] in ("mail", "election_day")
+                s["first_age"][v["age"]][2] += c["first"] == "new"
             s["part"][c["part"]] += 1
             for e in COMPARE:
                 y = e[:4]
@@ -284,7 +310,9 @@ def analyze():
         "through": latest.isoformat() if latest else None,
         "scopes": {k: finish(s) for k, s in sorted(scopes.items())},
         "flows": {y: {src: dict(d) for src, d in f.items()} for y, f in flows.items()},
-        "flow_timing": {y: {src: dict(d) for src, d in f.items()} for y, f in flow_timing.items()},
+        "flow_timing": {
+            y: {src: dict(d) for src, d in f.items()} for y, f in flow_timing.items()
+        },
         "sites26": {k: dict(t) for k, t in sites26.items()},
         "unmatched26": dict(unmatched26),
         "site_info": info,
@@ -296,4 +324,9 @@ if __name__ == "__main__":
     res = analyze()
     (CACHE / "analysis_2026_voters.json").write_text(json.dumps(res))
     nc = res["scopes"]["NC"]
-    print(json.dumps({k: nc[k] for k in ("n", "onestop", "mail", "first", "t2024", "w2024")}, indent=1))
+    print(
+        json.dumps(
+            {k: nc[k] for k in ("n", "onestop", "mail", "first", "t2024", "w2024")},
+            indent=1,
+        )
+    )

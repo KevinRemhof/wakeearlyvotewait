@@ -510,7 +510,11 @@ function renderKpis() {
   const firstN = x.onestop - (x.first.returning || 0);
   const earlier = (t.earlier || 0) + (t.election_day || 0);
   const kpi = (v, k, hero) => h("div", { class: "kpi" + (hero ? " hero" : "") }, h("div", { class: "v" }, v), h("div", { class: "k" }, k));
-  fill("kpi-sub", areaName());
+  const dbe = evDay(), day = dbe == null ? null : Math.min(Math.max(EV_FIRST - dbe + 1, 0), EV_DAYS), left = EV_DAYS - (day || 0);
+  const days = n => `${n} ${n === 1 ? "day" : "days"}`;
+  fill("kpi-sub", areaName(), day == null ? "" : left
+    ? ` · after ${days(day)} of ballots, ${days(left)} of early voting remain`
+    : ` · all ${days(EV_DAYS)} of early voting are in`);
   fill("kpis",
     kpi(fmtN(x.n), "ballots cast", true),
     kpi(fmtN(x.onestop), "one-stop (early, in person)"),
@@ -696,11 +700,12 @@ function renderFirst() {
   fill("first-sub", `${fmtN(firstN)} of ${fmtN(x.onestop)} one-stop voters in ${areaName()} (${fmtP(pct(firstN, x.onestop))}) have no earlier one-stop ballot on record:`
     + " none in a federal general election since 2002, or in any NC election (including primaries and municipal elections) since 2016.");
   const kinds = [["new", "No earlier NC vote on record"], ["mail", "Voted before, by mail"], ["election_day", "Voted before, on Election Day"]];
-  const ages = Object.entries(x.first_age).filter(([a]) => a !== "unknown")
-    .map(([a, v]) => ({ name: a, v: v[0], label: `${fmtN(v[0])} (${fmtP(pct(v[0], beforeN), 0)})`, note: `${fmtP(pct(v[0], v[1]))} of one-stop voters aged ${a}` }));
+  const byAge = (i, of) => Object.entries(x.first_age).filter(([a]) => a !== "unknown")
+    .map(([a, v]) => ({ name: a, v: v[i] || 0, label: `${fmtN(v[i] || 0)} (${fmtP(pct(v[i] || 0, of), 0)})`, note: `${fmtP(pct(v[i] || 0, v[1]))} of one-stop voters aged ${a}` }));
   fill("first",
     hbars("Their voting history", kinds.map(([k, n]) => ({ name: n, v: f[k] || 0, label: `${fmtN(f[k] || 0)} (${fmtP(pct(f[k] || 0, firstN), 0)})` }))),
-    hbars(`Voted in NC before, first time one-stop (${fmtN(beforeN)}), by age`, ages));
+    hbars(`No earlier NC vote on record (${fmtN(f.new || 0)}), by age`, byAge(2, f.new || 0)),
+    hbars(`Voted in NC before, first time one-stop (${fmtN(beforeN)}), by age`, byAge(0, beforeN)));
 }
 
 // ---- 100% stacked bars ----

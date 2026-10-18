@@ -84,10 +84,12 @@ The page shows totals only, never individual voters.
 | `geocode_sites.py` | Looks up coordinates for one-stop site addresses (US Census geocoder, OpenStreetMap fallback), for distances between sites |
 | `analyze_2026_voters.py` | Statewide and per-county totals: first-time one-stop voters, timing and site changes |
 | `nc_voting_report.py` | Builds the statewide report, `docs/2026_NC_Voting/index.html` |
+| `build_interim.py` | Builds interim data sets for statewide analysis as Parquet in `ncsbe_cache/interim/`: every voter and where they voted in each election since 2002, polling places and one-stop sites, county results by party, and registration (see RUNNING.md) |
 | `publish_nc_report.sh` | Rebuilds and pushes the statewide report when the State Board posts a new file; run every 30 minutes by launchd |
 | `RUNNING.md` | How to run everything |
 
-All scripts use only the Python 3.11+ standard library. Reading the county's turnout
+All scripts except `build_interim.py` use only the Python 3.11+ standard library;
+`build_interim.py` needs DuckDB (`pip install duckdb`). Reading the county's turnout
 PDF also needs `pdftotext` (`brew install poppler`). See [RUNNING.md](RUNNING.md).
 
 ## The data

@@ -195,6 +195,48 @@ Then build the report:
 A build takes a few minutes, longer as the 2026 file grows. The page shows only
 totals; the files it reads list individual voters and stay in `ncsbe_cache/`.
 
+### Interim data sets
+
+`build_interim.py` (needs `pip install duckdb`) turns the same downloads into
+Parquet files in `ncsbe_cache/interim/`, for analysis beyond the report. It
+downloads what else it needs from the State Board: absentee files for primaries
+and municipal elections since 2016 (deleted once converted), polling place
+lists since 2008, results and registration counts for each general.
+
+```sh
+./build_interim.py                         # everything, about 10 minutes
+./build_interim.py sources votes places    # or some steps: sources votes wide places results registration
+```
+
+| File | One row per | Notes |
+| --- | --- | --- |
+| `voters.parquet` | voter | Current party, race, ethnicity, sex and birth year; from the latest ballot record for voters no longer in the voter file |
+| `votes.parquet` | voter and election | Method (ONESTOP, MAIL, ELECTION_DAY), place, party at the time, ballot date |
+| `voter_elections.parquet` | voter | One column per election (`e20241105`, ...): the `place_id` where they voted, `MAIL`, or the method when the place isn't known; empty when there's no record of a vote |
+| `places.parquet` | voting place | Address and county, the elections it was an Election Day polling place or a one-stop site, and `onestop_only` |
+| `place_elections.parquet` | place and election | How it was used, with its precincts or site name |
+| `county_results.parquet` | county, general, contest and party | Votes and share for every partisan contest since 2002; `top_of_ticket` marks President, or US Senate in midterms (US House, all districts, in 2006 and 2018) |
+| `registration_stats.parquet` | general and group | Registered voters at each general since 2002 by county, precinct, party, race, ethnicity, sex and the State Board's age groups |
+| `registration_current.parquet` | voter | Current registration status, county, precinct and districts |
+
+What the sources cover:
+- **Voters** are keyed by `ncid`. Ballots before 2014 carry only county and
+  registration number. They're linked to an `ncid` where any file has both
+  (53% of 2002 ballots, 77% of 2012's), and otherwise keyed `COUNTY:regnum`.
+- **Generals from 2002 to 2014** come from the absentee files only, so they
+  include mail and one-stop ballots but no Election Day voters. Every election
+  since November 2016 comes from the voter history file, which covers all methods.
+- **One-stop sites** aren't recorded before 2014. 2014 to 2020 sites are named but
+  have no address list, so they're matched by name to later sites or to polling
+  places. Those that don't match keep a name-only `place_id` (`WAKE|NAME:...`) and
+  an unknown `onestop_only`.
+- **Election Day places** are each voter's precinct polling place for that election.
+
+No names, street addresses or phone numbers are copied into these files. The
+large zips are streamed through a pipe rather than extracted, and DuckDB's
+memory and temporary files are capped (10 GB and 6 GB), because the disk is
+nearly full.
+
 ### Automatically, as soon as the State Board posts a new file
 
 `publish_nc_report.sh` checks for a newer State Board file, rebuilds the report
