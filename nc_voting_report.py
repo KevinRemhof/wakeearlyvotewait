@@ -815,10 +815,11 @@ function milesBetween(a, b) {
 const fmtMi = m => m == null ? "" : ` (${m < 10 ? m.toFixed(1) : Math.round(m)} mi)`;
 // Voter-weighted totals over closed-site rows: voting earlier, distance, and reported results.
 function flowTotals(rs) {
-  const a = { n: 0, earlier: 0, timed: 0, miles: 0, located: 0, DEM: 0, REP: 0, OTHER: 0, reported: 0 };
+  const a = { n: 0, prior: 0, earlier: 0, timed: 0, miles: 0, located: 0, DEM: 0, REP: 0, OTHER: 0, reported: 0 };
   for (const r of rs) for (const k in a) a[k] += r.t[k];
   return a;
 }
+const votedText = a => a.prior ? fmtP(pct(a.n, a.prior), 0) : "—";
 const resultText = t => { const v = t.DEM + t.REP + t.OTHER; return v ? `D ${fmtP(pct(t.DEM, v), 0)} · R ${fmtP(pct(t.REP, v), 0)}` : "—"; };
 function resultBar(t, title) {
   const v = t.DEM + t.REP + t.OTHER;
@@ -832,6 +833,7 @@ function renderFlows() {
   const flows = D.flows[cmp] || {}, timing = D.flow_timing[cmp] || {}, results = D.results[cmp] || {}, contest = D.result_contests[cmp];
   const ids = Object.keys(flows).filter(id => inArea(id) && !openIn(id, "2026"));
   fill("flows-sub", `${cmp} one-stop sites in ${areaName()} that aren't 2026 sites, and how their ${cmp} voters who have cast a 2026 ballot so far are voting.`
+    + ` "Already voted" is the share of the site's ${cmp} one-stop voters who have cast a 2026 ballot, at another site or by mail.`
     + ` "Voting earlier" is the share casting their 2026 ballot earlier in early voting than they did at that site in ${cmp}.`
     + " Distances are straight-line miles from the closed site to the 2026 site each voter used.");
   fill("flows-foot", `${cmp} result: the ${contest} race among one-stop ballots cast at the site, from the State Board's precinct results.`
@@ -852,9 +854,10 @@ function renderFlows() {
     const years = [...new Set([...(D.older_years[id] || []), ...D.sites[id].years.filter(y => y !== "2026")])].sort();
     const top = Object.entries(d).filter(([k]) => k !== "MAIL").sort((a, b) => b[1] - a[1]).slice(0, 3);
     const avgMi = located ? miles / located : null, rv = res.DEM + res.REP + res.OTHER;
+    const prior = (D.sites[id].ballots || {})[cmp] || 0;
     return { group: titleCase(D.sites[id].county),
-      t: { n: tot, earlier: t.earlier || 0, timed: tTot, miles, located, ...res, reported: rv ? 1 : 0 },
-      sort: { site: siteName(id), n: tot, earlier: earlier ?? -1, miles: avgMi ?? -1, dem: rv ? pct(res.DEM - res.REP, rv) : -999 },
+      t: { n: tot, prior, earlier: t.earlier || 0, timed: tTot, miles, located, ...res, reported: rv ? 1 : 0 },
+      sort: { site: siteName(id), n: tot, voted: prior ? pct(tot, prior) : -1, earlier: earlier ?? -1, miles: avgMi ?? -1, dem: rv ? pct(res.DEM - res.REP, rv) : -999 },
       tr: () => {
         const mini = h("div", { class: "mini" }, [[other, parts[0]], [mail, parts[1]]].filter(([n]) => n)
           .map(([n, p]) => h("div", { style: { width: `${100 * n / tot}%`, background: p.color } })));
@@ -865,6 +868,7 @@ function renderFlows() {
           [null, fmtP(pct(t.same || 0, tTot)), `same day (${fmtN(t.same || 0)})`], [null, fmtP(pct(t.later || 0, tTot)), `later (${fmtN(t.later || 0)})`]]);
         return h("tr", {},
           h("td", {}, siteName(id), h("div", { class: "addr" }, siteAddr(id)), h("div", { class: "addr" }, `Open ${years.join(", ")}`)),
+          h("td", { class: "num" }, votedText({ n: tot, prior }), h("div", { class: "addr" }, `${fmtN(tot)} of ${fmtN(prior)}`)),
           h("td", {}, mini, h("div", { class: "addr" }, `${fmtN(tot)} voters`)),
           early,
           h("td", { class: "num" }, avgMi == null ? "—" : `${avgMi.toFixed(1)} mi`),
@@ -877,20 +881,22 @@ function renderFlows() {
   const repCounties = new Set(rows.filter(r => r.t.reported).map(r => r.group)).size;
   const kpi = (v, k) => h("div", { class: "kpi" }, h("div", { class: "v" }, v), h("div", { class: "k" }, k));
   fill("flows-kpis",
-    kpi(fmtN(rows.length), `closed ${cmp} ${rows.length === 1 ? "site" : "sites"}, ${fmtN(all.n)} of their voters have voted in 2026`),
+    kpi(fmtN(rows.length), `closed ${cmp} ${rows.length === 1 ? "site" : "sites"}, with ${fmtN(all.prior)} one-stop voters in ${cmp}`),
+    kpi(votedText(all), `of those ${cmp} voters (${fmtN(all.n)}) have already voted elsewhere in 2026`),
     kpi(fmtP(pct(all.earlier, all.timed), 0), "of those voters are voting earlier than they did in " + cmp),
     kpi(avgMi(all), "average distance to the 2026 site they used"),
     kpi(resultText(all), all.reported
       ? `${cmp} ${contest} at the ${all.reported} closed ${all.reported === 1 ? "site" : "sites"} reported by site (${repCounties} ${repCounties === 1 ? "county" : "counties"})`
       : `${cmp} result: no closed sites here are reported by site`));
   fill("flows", sortableTable([
-    { k: "site", name: `Closed ${cmp} site`, sort: true }, { k: "n", name: "How they're voting", sort: true, num: false },
+    { k: "site", name: `Closed ${cmp} site`, sort: true }, { k: "voted", name: "Already voted in 2026", num: true, sort: true },
+    { k: "n", name: "How they're voting", sort: true, num: false },
     { k: "earlier", name: "Voting earlier", num: true, sort: true }, { k: "miles", name: "Avg. distance", num: true, sort: true },
     { k: "dem", name: `${cmp} result`, sort: true }, { k: "dest", name: "2026 site" },
   ], rows, { key: "n", dir: -1 }, (name, rs) => {
     const a = flowTotals(rs);
-    return h("tr", { class: "group" }, h("td", { colspan: 6 }, `${name} County`,
-      h("span", { class: "n" }, [`${rs.length} closed ${rs.length === 1 ? "site" : "sites"}`, `${fmtN(a.n)} voters`,
+    return h("tr", { class: "group" }, h("td", { colspan: 7 }, `${name} County`,
+      h("span", { class: "n" }, [`${rs.length} closed ${rs.length === 1 ? "site" : "sites"}`, `${votedText(a)} of ${fmtN(a.prior)} ${cmp} voters have voted`,
         `${fmtP(pct(a.earlier, a.timed), 0)} voting earlier`, `avg. ${avgMi(a)}`,
         a.reported ? `${cmp}: ${resultText(a)}` : null].filter(Boolean).join(" · "))));
   }));

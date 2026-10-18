@@ -64,6 +64,7 @@ def load_crosswalk():
             "name": latest["site_name"],
             "address": s["address"],
             "years": sorted(e[:4] for e in s["elections"]),
+            "ballots": {e[:4]: v["one_stop_ballots"] for e, v in s["elections"].items()},
         }
         for e, v in s["elections"].items():
             ids[(e, s["county"], v["site_name"])] = s["id"]
